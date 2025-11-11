@@ -1,0 +1,37 @@
+{
+  "name": "Converging Nozzle",
+  "description": "Simple converging nozzle for subsonic flow acceleration",
+  "type": "converging",
+  "elements": [
+    {
+      "type": "PolynomialElement",
+      "control_points": [
+        [0.0, 0.3],
+        [0.5, 0.2],
+        [1.0, 0.1]
+      ],
+      "description": "Main converging section"
+    },
+    {
+      "type": "PolynomialElement",
+      "control_points": [
+        [1.0, 0.1],
+        [1.2, 0.08],
+        [1.5, 0.05]
+      ],
+      "description": "Outlet section"
+    }
+  ],
+  "flow_conditions": {
+    "inlet_pressure": 200000,
+    "outlet_pressure": 101325,
+    "inlet_temperature": 300,
+    "design_mach": 0.8
+  },
+  "mesh_settings": {
+    "element_size": 0.01,
+    "boundary_layers": true,
+    "bl_thickness": 0.002,
+    "bl_layers": 3
+  }
+}

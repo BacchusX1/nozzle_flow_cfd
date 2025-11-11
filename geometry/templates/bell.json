@@ -1,0 +1,47 @@
+{
+  "name": "Bell Nozzle",
+  "description": "Bell-shaped nozzle optimized for rocket propulsion",
+  "type": "bell",
+  "elements": [
+    {
+      "type": "PolynomialElement",
+      "control_points": [
+        [0.0, 0.35],
+        [0.4, 0.25],
+        [0.6, 0.1]
+      ],
+      "description": "Converging section"
+    },
+    {
+      "type": "PolynomialElement",
+      "control_points": [
+        [0.6, 0.1],
+        [0.65, 0.05],
+        [0.7, 0.05]
+      ],
+      "description": "Throat section"
+    },
+    {
+      "type": "PolynomialElement",
+      "control_points": [
+        [0.7, 0.05],
+        [0.9, 0.12],
+        [1.2, 0.2],
+        [1.5, 0.25]
+      ],
+      "description": "Bell expansion section"
+    }
+  ],
+  "flow_conditions": {
+    "inlet_pressure": 500000,
+    "outlet_pressure": 1000,
+    "inlet_temperature": 3000,
+    "design_mach": 3.5
+  },
+  "mesh_settings": {
+    "element_size": 0.003,
+    "boundary_layers": true,
+    "bl_thickness": 0.0005,
+    "bl_layers": 7
+  }
+}

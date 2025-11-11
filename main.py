@@ -1,0 +1,66 @@
+#!/usr/bin/env python3
+"""
+Nozzle CFD Design Tool - Main Application Launcher
+
+Professional CFD workflow application with immediate drawing capability.
+Complete geometry design, meshing, simulation, and post-processing workflow.
+
+Usage:
+    python main.py
+
+Features:
+    ✅ Immediate drawing (no start/stop buttons)
+    ✅ Advanced meshing with boundary layers
+    ✅ CFD simulation setup
+    ✅ Post-processing visualization
+    ✅ Professional dark theme interface
+
+Requirements:
+    - PySide6, numpy, matplotlib, scipy
+    - Optional: gmsh (for advanced meshing)
+    - Optional: OpenFOAM (for CFD simulation)
+"""
+
+import sys
+import os
+
+# Add project root to path for proper imports
+sys.path.insert(0, os.path.dirname(__file__))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'src'))
+
+def main():
+    """Launch the nozzle CFD design tool."""
+    try:
+        from PySide6.QtWidgets import QApplication
+        from frontend import NozzleDesignGUI
+        
+        # Create QApplication
+        app = QApplication(sys.argv)
+        
+        # Create and show main window
+        window = NozzleDesignGUI()
+        window.show()
+        
+        # Run the application
+        return app.exec()
+        
+    except ImportError as e:
+        print(f"❌ Import error: {e}")
+        print("Please ensure all dependencies are installed:")
+        print("  conda install pyside6 matplotlib numpy scipy")
+        print("  pip install gmsh")
+        return 1
+    except Exception as e:
+        print(f"❌ Application error: {e}")
+        return 1
+
+if __name__ == "__main__":
+    print("🚀 Starting Nozzle CFD Design Tool...")
+    print("✨ Professional CFD Workflow Features:")
+    print("  • Immediate geometry drawing")
+    print("  • Advanced mesh generation") 
+    print("  • CFD simulation setup")
+    print("  • Results visualization")
+    print()
+    
+    sys.exit(main())

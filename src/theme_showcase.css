@@ -1,0 +1,143 @@
+
+/* === WORLD-CLASS CFD DESIGNER THEME === */
+
+/* Ultra-Premium Colors */
+:root {
+    --primary: #00d9ff;
+    --accent: #ff6b35; 
+    --success: #00ff88;
+    --background: #0a0c10;
+    --surface: #1a1d23;
+    --text: #ffffff;
+}
+
+/* Responsive Button Example */
+
+            QPushButton {
+                background: #00d9ff;
+                color: #1a1d23;
+                border: none;
+                border-radius: 10px;
+                padding: 16px 24px;
+                font-size: 11px;
+                font-weight: 500;
+                font-family: 'Segoe UI', 'Inter', sans-serif;
+                letter-spacing: 0.5px;
+                text-transform: none;
+                min-height: 40px;
+            }
+            QPushButton:hover {
+                background: #33e6ff;
+                transform: translateY(-1px);
+            }
+            QPushButton:pressed {
+                background: #0099cc;
+                transform: translateY(0px);
+            }
+            QPushButton:disabled {
+                background: #3d424a;
+                color: #8b92a5;
+                opacity: 0.6;
+            }
+        
+
+/* Glass Morphism Effects */
+
+            /* Glass morphism panels */
+            .glass-panel {
+                background: rgba(255, 255, 255, 0.05);
+                backdrop-filter: blur(16px);
+                border: 1px solid rgba(255, 255, 255, 0.1);
+                border-radius: 14px;
+                box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+            }
+            
+            /* Glass morphism buttons */
+            .glass-button {
+                background: rgba(0, 217, 255, 0.1);
+                backdrop-filter: blur(8px);
+                border: 1px solid rgba(0, 217, 255, 0.3);
+                color: #ffffff;
+            }
+            
+            .glass-button:hover {
+                background: rgba(0, 217, 255, 0.2);
+                box-shadow: 0 0 20px rgba(0, 217, 255, 0.4);
+            }
+        
+
+/* World-Class Animations */
+
+            /* Smooth transitions for everything */
+            * {
+                transition: all 0.3s cubic-bezier(0.4, 0.0, 0.2, 1);
+            }
+            
+            /* Hover animations */
+            QPushButton:hover {
+                transform: translateY(-2px) scale(1.02);
+                box-shadow: 0 8px 25px rgba(0, 217, 255, 0.3);
+            }
+            
+            QPushButton:pressed {
+                transform: translateY(0px) scale(0.98);
+                transition-duration: 0.1s;
+            }
+            
+            /* Focus animations */
+            QLineEdit:focus, QTextEdit:focus, QComboBox:focus {
+                transform: scale(1.02);
+                box-shadow: 0 0 0 3px rgba(0, 217, 255, 0.2);
+            }
+            
+            /* Tab animations */
+            QTabBar::tab:hover:selected {
+                transform: translateY(-2px);
+            }
+        
+
+/* Fullscreen Scaling (4K) */
+
+            /* Fullscreen responsive scaling */
+            * {
+                font-size: 18px;
+            }
+            
+            QMainWindow {
+                font-size: 18px;
+            }
+            
+            QGroupBox {
+                font-size: 19px;
+                padding: 36px 21px;
+            }
+            
+            QPushButton {
+                font-size: 18px;
+                padding: 21px 43px;
+                min-height: 72px;
+                border-radius: 14px;
+            }
+            
+            QLabel {
+                font-size: 17px;
+            }
+            
+            QTabBar::tab {
+                font-size: 18px;
+                padding: 28px 43px;
+                min-width: 216px;
+            }
+            
+            QLineEdit, QSpinBox, QDoubleSpinBox, QComboBox {
+                font-size: 17px;
+                padding: 21px 28px;
+                min-height: 64px;
+            }
+            
+            /* Ensure text stays readable */
+            QWidget {
+                font-family: 'Segoe UI', 'Inter', 'SF Pro Display', sans-serif;
+                font-weight: 400;
+            }
+        

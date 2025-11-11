@@ -1,0 +1,123 @@
+# Nozzle CFD Design Tool
+
+Professional CFD workflow application for nozzle geometry design, meshing, simulation, and post-processing.
+
+## 🚀 Quick Start
+
+### Main Application
+```bash
+python main.py
+```
+
+### Alternative Launchers
+```bash
+# GUI launcher script
+./scripts/launch_app.sh
+
+# Backend-only demo (no GUI)
+python demo_backend.py
+
+# Legacy version (for comparison)
+python legacy.py
+```
+
+## ✨ Features
+
+### 🎨 **Immediate Geometry Drawing**
+- Click to draw immediately (no start/stop buttons)
+- Polynomial curves, lines, and arcs
+- Real-time visualization with symmetric options
+
+### 🔧 **Advanced Meshing**
+- Boundary layer mesh generation
+- Gmsh integration for quality control
+- Mesh statistics and analysis
+
+### ⚙️ **CFD Simulation Setup**
+- Complete OpenFOAM case generation
+- Boundary condition configuration
+- Solver and turbulence model selection
+
+### 📊 **Post-processing**
+- Multi-field visualization (velocity, pressure, temperature)
+- Contour plots, vector fields, streamlines
+- Data analysis and export tools
+
+## 📁 Project Structure
+
+```
+nozzle_flow_cfd/
+├── main.py                    # Main application launcher
+├── legacy.py                  # Legacy version launcher
+├── demo_backend.py            # Backend functionality demo
+├── test_backend.py            # Backend testing
+├── src/
+│   ├── frontend.py            # Main GUI application
+│   ├── frontend_legacy.py     # Legacy frontend
+│   ├── backend.py             # Geometry engine
+│   └── modules/               # Advanced CFD modules
+│       ├── mesh_generator.py  # Mesh generation
+│       ├── simulation_setup.py # CFD setup
+│       └── postprocessing.py  # Visualization
+├── test/
+│   ├── test_all.py            # Comprehensive test suite
+│   └── test_app.py            # Original tests
+├── scripts/
+│   └── launch_app.sh          # Shell launcher
+└── README.md                  # This file
+```
+
+## 🧪 Testing
+
+### Run All Tests
+```bash
+python test/test_all.py
+```
+
+### Backend Verification
+```bash
+python test_backend.py
+```
+
+## 📋 Requirements
+
+### Core Dependencies
+- Python 3.8+
+- PySide6 (GUI framework)
+- NumPy, SciPy (numerical computing)
+- Matplotlib (plotting)
+
+### Optional Dependencies
+- Gmsh (advanced meshing)
+- OpenFOAM (CFD simulation)
+
+### Installation
+```bash
+# Core dependencies
+conda install pyside6 matplotlib numpy scipy
+
+# Optional advanced features
+pip install gmsh
+```
+
+## 🎯 Usage Workflow
+
+1. **Geometry**: Design nozzle geometry with immediate drawing
+2. **Meshing**: Generate mesh with boundary layer controls
+3. **Simulation**: Setup CFD case with boundary conditions
+4. **Post-processing**: Visualize and analyze results
+
+## 🏗️ Architecture
+
+- **Modular Design**: Clean separation between geometry, meshing, simulation, and post-processing
+- **Professional UI**: Dark theme with tabbed workflow
+- **Robust Backend**: Comprehensive error handling and validation
+- **Extensible**: Easy to add new features and capabilities
+
+## 📈 Recent Improvements
+
+- ✅ Removed start/stop drawing buttons for immediate drawing
+- ✅ Added advanced meshing with boundary layers
+- ✅ Implemented complete CFD simulation setup
+- ✅ Added professional post-processing tools
+- ✅ Reorganized for clean, maintainable structure

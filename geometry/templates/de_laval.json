@@ -1,0 +1,46 @@
+{
+  "name": "De Laval Nozzle",
+  "description": "Classic converging-diverging nozzle for supersonic flow",
+  "type": "de_laval",
+  "elements": [
+    {
+      "type": "PolynomialElement",
+      "control_points": [
+        [0.0, 0.3],
+        [0.3, 0.2],
+        [0.5, 0.1]
+      ],
+      "description": "Converging section"
+    },
+    {
+      "type": "PolynomialElement", 
+      "control_points": [
+        [0.5, 0.1],
+        [0.6, 0.05],
+        [0.7, 0.05]
+      ],
+      "description": "Throat section"
+    },
+    {
+      "type": "PolynomialElement",
+      "control_points": [
+        [0.7, 0.05],
+        [1.0, 0.15],
+        [1.5, 0.25]
+      ],
+      "description": "Diverging section"
+    }
+  ],
+  "flow_conditions": {
+    "inlet_pressure": 300000,
+    "outlet_pressure": 101325,
+    "inlet_temperature": 300,
+    "design_mach": 2.0
+  },
+  "mesh_settings": {
+    "element_size": 0.005,
+    "boundary_layers": true,
+    "bl_thickness": 0.001,
+    "bl_layers": 5
+  }
+}
