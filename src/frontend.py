@@ -51,6 +51,7 @@ from core.template_loader import TemplateLoader
 from core.modules.mesh_generator import AdvancedMeshGenerator
 from core.modules.simulation_setup import SimulationSetup
 from core.modules.postprocessing import ResultsProcessor
+from core.modules.interactive_postprocessor import InteractivePostprocessorWidget
 from core.openfoam_runner import OpenFOAMRunner
 
 
@@ -86,90 +87,160 @@ class NozzleDesignGUI(QMainWindow):
         self.current_mesh_data = None
         self.current_case_directory = ""
         self.current_results = None
+
+        # Optional workflow status UI (may not be present)
+        self.status_labels = {}
+        self.progress_bars = {}
         
         # Editing state
         self.editing_mode = "draw"
         self.selected_element_index = None
         
+        # Scaling state (computed once window is shown and when moved/resized)
+        self.scale_factor = 1.0
+        self.base_font_size = 10
+        self._last_applied_scale = None
+
         self.setup_ui()
+        # Apply initial theme/font; will be refined on first showEvent
+        self.apply_responsive_font(force=True)
         self.apply_theme()
-        self.apply_responsive_font()
         
-    def apply_responsive_font(self):
-        """Apply a properly sized font system that doesn't scale out of control."""
-        # Get screen DPI for proper scaling
-        screen = QApplication.primaryScreen()
-        dpi = screen.logicalDotsPerInch()
-        geometry = screen.geometry()
+    def _get_target_screen(self):
+        handle = self.windowHandle()
+        if handle and handle.screen():
+            return handle.screen()
+        return QApplication.primaryScreen()
+
+    def _compute_scale_factor(self) -> float:
+        """Compute a stable UI scale factor based on DPI and resolution.
+
+        Uses weighted average of physical DPI and logical resolution.
+        This scales appropriately for 1080p (1.0), 1440p (1.2), 4K (1.4+).
+        """
+        screen = self._get_target_screen()
+        if screen is None:
+            return 1.0
+
+        # Get both logical DPI and physical pixel dimensions
+        logical_dpi = float(screen.logicalDotsPerInch() or 96.0)
+        device_pixel_ratio = screen.devicePixelRatio() if hasattr(screen, 'devicePixelRatio') else 1.0
         
-        # Use minimal scaling to prevent text from becoming too large
-        scale_factor = max(0.8, min(1.2, dpi / 96.0))  # Clamp between 0.8 and 1.2
+        geom = screen.availableGeometry()
+        width_px = float(geom.width())
+        height_px = float(geom.height())
         
-        # Use smaller base sizes and don't scale them up for fullscreen
-        base_size = 10  # Fixed small size
+        # Calculate resolution-based scale: 1920x1080 = 1.0
+        # 3840x2160 (4K) = ~2.0, 2560x1440 (1440p) = ~1.2
+        diagonal_px = (width_px ** 2 + height_px ** 2) ** 0.5
+        diagonal_reference = (1920.0 ** 2 + 1080.0 ** 2) ** 0.5
+        resolution_scale = diagonal_px / diagonal_reference
         
-        # Use simple system font
+        # DPI scale with device pixel ratio consideration
+        dpi_scale = (logical_dpi / 96.0) * max(device_pixel_ratio, 1.0)
+        
+        # Weighted average: 60% resolution, 40% DPI
+        combined_scale = (0.6 * resolution_scale) + (0.4 * dpi_scale)
+        
+        # Keep within reasonable limits (0.75x for small screens, 2.5x for ultra-high res)
+        return max(0.75, min(2.5, combined_scale))
+
+    def apply_responsive_font(self, force: bool = False):
+        """Apply a resolution-aware font system.
+
+        This is safe to call repeatedly; it only reapplies when the scale changes.
+        """
+        scale = self._compute_scale_factor()
+        if (not force) and (self._last_applied_scale is not None) and abs(scale - self._last_applied_scale) < 0.05:
+            return
+
+        # Base font grows with scale; clamp to keep layout stable.
+        base_size = int(round(10 * scale))
+        base_size = max(10, min(16, base_size))
+
         font = QFont("Arial", base_size)
         font.setWeight(QFont.Weight.Normal)
         font.setStyleStrategy(QFont.StyleStrategy.PreferAntialias)
-        
-        # Apply to application
         self.setFont(font)
-        
-        # Store scale factor but don't let it grow
-        self.scale_factor = 1.0  # Fixed scale factor
-        self.base_font_size = base_size
-        self.is_fullscreen = False  # Don't auto-detect fullscreen scaling
-        self.screen_width = geometry.width()
-        
-        # Keep theme font sizes small and fixed
-        Theme.FONT_SIZE_TINY = 8
-        Theme.FONT_SIZE_SMALL = 9
-        Theme.FONT_SIZE_NORMAL = 10
-        Theme.FONT_SIZE_MEDIUM = 11
-        Theme.FONT_SIZE_LARGE = 12
-        Theme.FONT_SIZE_XLARGE = 14
-        Theme.FONT_SIZE_TITLE = 16
-        
-        print(f"Applied fixed font system: {font.family()} ({base_size}px)")
+
+        self.scale_factor = float(scale)
+        self.base_font_size = int(base_size)
+        self._last_applied_scale = float(scale)
+
+        # Theme font sizes follow base_size
+        Theme.FONT_SIZE_TINY = max(8, self.base_font_size - 2)
+        Theme.FONT_SIZE_SMALL = max(9, self.base_font_size - 1)
+        Theme.FONT_SIZE_NORMAL = self.base_font_size
+        Theme.FONT_SIZE_MEDIUM = self.base_font_size + 1
+        Theme.FONT_SIZE_LARGE = self.base_font_size + 2
+        Theme.FONT_SIZE_XLARGE = self.base_font_size + 4
+        Theme.FONT_SIZE_TITLE = self.base_font_size + 6
+
+        # Layout scaling
+        self.update_ui_scaling()
         
     def changeEvent(self, event):
-        """Handle window state changes without auto-scaling."""
+        """Handle window state changes."""
         super().changeEvent(event)
-        # Don't auto-scale on window state changes
+        # Don't call apply_theme() here - it triggers setStyleSheet which causes recursion
         
     def resizeEvent(self, event):
-        """Handle window resize without auto-scaling to prevent size explosion."""
+        """Handle window resize and keep UI responsive."""
         super().resizeEvent(event)
-        # Don't automatically change font sizes on resize
-        # This prevents the scaling from getting out of control
+        # Only update splitter proportions on resize, not full theme
+        self._update_splitter_on_resize()
             
     def showEvent(self, event):
         """Handle window show event for proper initialization."""
         super().showEvent(event)
-        
-        # Ensure proper scaling when window becomes visible
-        if hasattr(self, 'scale_factor'):
-            self.update_ui_scaling()
+        # Theme is already applied in __init__, no need to reapply
             
     def update_ui_scaling(self):
-        """Keep UI sizing compact and fixed."""
-        # Use fixed compact sizing to prevent scaling issues
+        """Adjust key layout constraints based on current scale_factor."""
+        scale = getattr(self, 'scale_factor', 1.0) or 1.0
+
         if hasattr(self, 'left_panel'):
-            self.left_panel.setMaximumWidth(350)
-            self.left_panel.setMinimumWidth(300)
+            # Dynamic left panel sizing based on resolution
+            base_min_width = 280  # Minimum width at 1x scale
+            base_max_width = 340  # Maximum width at 1x scale
+            min_w = int(round(base_min_width * scale))
+            max_w = int(round(base_max_width * scale))
+            self.left_panel.setMinimumWidth(min_w)
+            self.left_panel.setMaximumWidth(max_w)
+            
+        # Dynamically adjust splitter sizes if it exists
+        if hasattr(self, 'main_splitter') and self.main_splitter is not None:
+            # Calculate left panel size based on scale
+            left_size = int(round(320 * scale))
+            # Get total available width
+            total_size = self.main_splitter.width()
+            if total_size > 0:
+                right_size = total_size - left_size
+                self.main_splitter.setSizes([left_size, right_size])
+        
+    def _update_splitter_on_resize(self):
+        """Update splitter proportions when window is resized."""
+        if hasattr(self, 'main_splitter') and self.main_splitter is not None:
+            scale = getattr(self, 'scale_factor', 1.0) or 1.0
+            left_size = int(round(320 * scale))
+            total_size = self.main_splitter.width()
+            if total_size > left_size + 100:  # Ensure minimum space for right panel
+                right_size = total_size - left_size
+                self.main_splitter.setSizes([left_size, right_size])
         
     def apply_theme(self):
         """Apply clean modern theme with proper small font sizes."""
-        # Use fixed small sizes - no scaling to prevent issues
-        normal_font = 10
-        medium_font = 11
-        large_font = 12
-        
-        # Fixed small spacing to prevent button overlays
-        spacing_sm = 4
-        spacing_md = 8
-        spacing_lg = 12
+        # Use resolution-aware sizes
+        normal_font = int(getattr(Theme, 'FONT_SIZE_NORMAL', 10))
+        medium_font = int(getattr(Theme, 'FONT_SIZE_MEDIUM', normal_font + 1))
+        large_font = int(getattr(Theme, 'FONT_SIZE_LARGE', normal_font + 2))
+
+        scale = getattr(self, 'scale_factor', 1.0) or 1.0
+
+        # Spacing scales gently
+        spacing_sm = int(round(4 * scale))
+        spacing_md = int(round(8 * scale))
+        spacing_lg = int(round(12 * scale))
         
         self.setStyleSheet(f"""
             /* === CLEAN BASE STYLING === */
@@ -196,15 +267,16 @@ class NozzleDesignGUI(QMainWindow):
                 font-size: {normal_font}px;
                 border: 1px solid {Theme.BORDER};
                 border-radius: 8px;
-                margin-top: 10px;
-                padding: 8px 6px 6px 6px;
+                /* Give the title room; avoids clipped/overlapping headers */
+                margin-top: 16px;
+                padding: 18px 8px 8px 8px;
             }}
             QGroupBox::title {{
                 subcontrol-origin: margin;
                 subcontrol-position: top left;
                 left: 8px;
-                top: -5px;
-                padding: 2px 8px;
+                top: 0px;
+                padding: 2px 10px;
                 background: {Theme.SURFACE_VARIANT};
                 border-radius: 4px;
                 color: {Theme.TEXT_PRIMARY};
@@ -221,8 +293,8 @@ class NozzleDesignGUI(QMainWindow):
                 font-size: {normal_font}px;
                 font-weight: 500;
                 font-family: Arial, sans-serif;
-                min-height: 24px;
-                max-height: 32px;
+                min-height: {int(round(24 * scale))}px;
+                max-height: {int(round(36 * scale))}px;
             }}
             QPushButton:hover {{
                 background: {Theme.PRIMARY_LIGHT};
@@ -243,8 +315,8 @@ class NozzleDesignGUI(QMainWindow):
                 border-radius: 4px;
                 padding: 4px 8px;
                 font-size: {normal_font}px;
-                min-height: 20px;
-                max-height: 24px;
+                min-height: {int(round(20 * scale))}px;
+                max-height: {int(round(28 * scale))}px;
             }}
             QLineEdit:focus, QSpinBox:focus, QDoubleSpinBox:focus, QComboBox:focus {{
                 border-color: {Theme.INPUT_BORDER_FOCUS};
@@ -330,12 +402,27 @@ class NozzleDesignGUI(QMainWindow):
         pass
         
     def setup_ui(self):
-        """Setup the clean, compact user interface optimized for 1920x1080 fullscreen."""
+        """Setup the UI with resolution-aware sizing."""
         self.setWindowTitle("Nozzle Flow CFD Designer - Professional Edition")
-        
-        # Optimize for 1920x1080 fullscreen
-        self.setGeometry(0, 0, 1920, 1080)
-        self.setMinimumSize(1400, 800)
+
+        # Size relative to available screen (works well on 1080p..4K)
+        screen = QApplication.primaryScreen()
+        if screen is not None:
+            geom = screen.availableGeometry()
+            w = int(round(geom.width() * 0.90))
+            h = int(round(geom.height() * 0.90))
+            self.resize(w, h)
+        else:
+            self.resize(1600, 900)
+
+        # Dynamic minimum size based on scale
+        scale = self._compute_scale_factor()
+        min_width = int(round(1200 * scale))
+        min_height = int(round(750 * scale))
+        # Clamp to reasonable values (avoid getting too large on ultra-high-res screens)
+        min_width = max(1100, min(2400, min_width))
+        min_height = max(700, min(1600, min_height))
+        self.setMinimumSize(min_width, min_height)
         
         # Create central widget
         central_widget = QWidget()
@@ -348,23 +435,26 @@ class NozzleDesignGUI(QMainWindow):
         main_layout.setSpacing(4)
         
         # Create main splitter with fixed handle
-        main_splitter = QSplitter(Qt.Horizontal)
-        main_splitter.setHandleWidth(1)
-        main_splitter.setChildrenCollapsible(False)  # Prevent panels from collapsing
-        main_layout.addWidget(main_splitter)
+        self.main_splitter = QSplitter(Qt.Horizontal)
+        self.main_splitter.setHandleWidth(1)
+        self.main_splitter.setChildrenCollapsible(False)  # Prevent panels from collapsing
+        main_layout.addWidget(self.main_splitter)
         
         # Left panel - Compact control panel
         self.left_panel = self.create_modern_left_panel()
-        main_splitter.addWidget(self.left_panel)
+        self.main_splitter.addWidget(self.left_panel)
         
         # Right panel - Main workflow tabs
         self.tab_widget = self.create_modern_tab_widget()
-        main_splitter.addWidget(self.tab_widget)
+        self.main_splitter.addWidget(self.tab_widget)
         
-        # Set fixed proportions for fullscreen (300px left, rest for tabs)
-        main_splitter.setSizes([300, 1620])
-        main_splitter.setStretchFactor(0, 0)  # Left panel doesn't stretch
-        main_splitter.setStretchFactor(1, 1)  # Tab widget stretches
+        # Set dynamic proportions based on scale
+        # Left panel gets ~20% of space, right panel ~80%
+        left_size = int(round(320 * scale))
+        right_size = int(round(1280 * scale))
+        self.main_splitter.setSizes([left_size, right_size])
+        self.main_splitter.setStretchFactor(0, 0)  # Left panel doesn't stretch
+        self.main_splitter.setStretchFactor(1, 1)  # Tab widget stretches
         
         # Create compact menu bar and status bar
         self.create_modern_menu_bar()
@@ -403,13 +493,6 @@ class NozzleDesignGUI(QMainWindow):
         # Header section without emoticons
         header = self.create_header_section()
         layout.addWidget(header)
-        
-        # Workflow status card
-        status_card = self.create_status_card()
-        layout.addWidget(status_card)
-        
-        # Add 8pt spacing between workflow status and parameters
-        layout.addSpacing(8)
         
         # Parameters card
         params_card = self.create_parameters_card()
@@ -585,16 +668,38 @@ class NozzleDesignGUI(QMainWindow):
         project_section = QWidget()
         project_layout = QFormLayout(project_section)
         project_layout.setSpacing(8)
+
+        self.project_file_display = QLineEdit()
+        self.project_file_display.setReadOnly(True)
+        self.project_file_display.setPlaceholderText("Not saved")
+        self.project_file_display.setToolTip(
+            "<b>Project File</b><br/>"
+            "Path to the saved project JSON (if any)."
+        )
+        project_layout.addRow("Project File:", self.project_file_display)
+
+        self.case_dir_display = QLineEdit()
+        self.case_dir_display.setReadOnly(True)
+        self.case_dir_display.setPlaceholderText("Not exported")
+        self.case_dir_display.setToolTip(
+            "<b>OpenFOAM Case Directory</b><br/>"
+            "Folder where the OpenFOAM case was exported (if any)."
+        )
+        project_layout.addRow("Case Dir:", self.case_dir_display)
         
         self.project_name_edit = QLineEdit("Untitled Project")
-        self.project_name_edit.setToolTip("Enter a descriptive name for your CFD project")
+        self.project_name_edit.setToolTip(
+            "<b>Project Name</b><br/>"
+            "A human-friendly name for this nozzle design." )
         self.project_name_edit.textChanged.connect(self.on_project_name_changed)
         project_layout.addRow("Project Name:", self.project_name_edit)
         
         self.project_description = QTextEdit()
         self.project_description.setMaximumHeight(60)
         self.project_description.setPlaceholderText("Brief description of the nozzle design...")
-        self.project_description.setToolTip("Add notes about design objectives, operating conditions, etc.")
+        self.project_description.setToolTip(
+            "<b>Description / Notes</b><br/>"
+            "Design goals, operating conditions, and any assumptions." )
         project_layout.addRow("Description:", self.project_description)
         
         layout.addWidget(project_section)
@@ -621,19 +726,25 @@ class NozzleDesignGUI(QMainWindow):
         self.min_throat_ratio.setValue(0.5)
         self.min_throat_ratio.setSingleStep(0.1)
         self.min_throat_ratio.setDecimals(2)
-        self.min_throat_ratio.setToolTip("Minimum throat-to-inlet area ratio")
+        self.min_throat_ratio.setToolTip(
+            "<b>Min $A^*/A_{inlet}$</b><br/>"
+            "Lower bound constraint for the throat-to-inlet area ratio." )
         constraints_layout.addRow("Min A*/A_inlet:", self.min_throat_ratio)
         
         self.max_divergence_angle = QSpinBox()
         self.max_divergence_angle.setRange(5, 45)
         self.max_divergence_angle.setValue(20)
         self.max_divergence_angle.setSuffix("°")
-        self.max_divergence_angle.setToolTip("Maximum divergence half-angle")
+        self.max_divergence_angle.setToolTip(
+            "<b>Max Divergence</b><br/>"
+            "Upper bound on the nozzle half-angle in the diverging section." )
         constraints_layout.addRow("Max Divergence:", self.max_divergence_angle)
         
         self.enforce_continuity = QCheckBox("Enforce C1 Continuity")
         self.enforce_continuity.setChecked(True)
-        self.enforce_continuity.setToolTip("Ensure smooth transitions between elements")
+        self.enforce_continuity.setToolTip(
+            "<b>Enforce $C^1$ Continuity</b><br/>"
+            "Prefer smooth slope transitions between geometry elements." )
         constraints_layout.addRow("", self.enforce_continuity)
         
         layout.addWidget(constraints_section)
@@ -681,8 +792,52 @@ class NozzleDesignGUI(QMainWindow):
             """)
         
         layout.addWidget(info_section)
+
+        # Initialize metadata display
+        self.refresh_project_metadata()
         
         return card
+
+    def refresh_project_metadata(self):
+        """Refresh the left-panel project metadata fields (safe if widgets not created yet)."""
+        if hasattr(self, 'project_file_display'):
+            self.project_file_display.setText(self.current_file or "")
+
+        if hasattr(self, 'case_dir_display'):
+            self.case_dir_display.setText(self.current_case_directory or "")
+
+        # Update quick geometry stats if the info labels exist
+        if hasattr(self, 'info_labels') and isinstance(self.info_labels, dict):
+            try:
+                self.info_labels.get('elements') and self.info_labels['elements'].setText(str(len(self.geometry.elements)))
+
+                x_coords, y_coords = self.geometry.get_interpolated_points(
+                    num_points_per_element=getattr(self, 'interpolation_points', None) and self.interpolation_points.value() or 100
+                )
+                if x_coords and y_coords:
+                    inlet_r = float(y_coords[0]) if y_coords[0] is not None else 0.0
+                    throat_r = float(min(y for y in y_coords if y is not None))
+                    outlet_r = float(y_coords[-1]) if y_coords[-1] is not None else 0.0
+
+                    length = float(max(x_coords) - min(x_coords))
+                    self.info_labels.get('length') and self.info_labels['length'].setText(f"{length:.3f} m")
+
+                    if inlet_r > 0 and throat_r > 0:
+                        self.info_labels.get('throat_ratio') and self.info_labels['throat_ratio'].setText(f"{throat_r / inlet_r:.3f}")
+                    else:
+                        self.info_labels.get('throat_ratio') and self.info_labels['throat_ratio'].setText("N/A")
+
+                    if throat_r > 0 and outlet_r > 0:
+                        self.info_labels.get('expansion_ratio') and self.info_labels['expansion_ratio'].setText(f"{outlet_r / throat_r:.3f}")
+                    else:
+                        self.info_labels.get('expansion_ratio') and self.info_labels['expansion_ratio'].setText("N/A")
+                else:
+                    self.info_labels.get('length') and self.info_labels['length'].setText("0.00 m")
+                    self.info_labels.get('throat_ratio') and self.info_labels['throat_ratio'].setText("N/A")
+                    self.info_labels.get('expansion_ratio') and self.info_labels['expansion_ratio'].setText("N/A")
+            except Exception:
+                # Keep UI responsive even if geometry stats fail
+                pass
     
     def create_modern_menu_bar(self):
         """Create a modern, beautiful menu bar."""
@@ -1300,6 +1455,8 @@ class NozzleDesignGUI(QMainWindow):
         controls_widget = QWidget()
         controls_widget.setMaximumWidth(320)
         controls_layout = QVBoxLayout(controls_widget)
+        controls_layout.setContentsMargins(8, 8, 8, 8)
+        controls_layout.setSpacing(8)
         
         # Enhanced drawing mode selection
         mode_group = QGroupBox("Drawing Modes")
@@ -1322,7 +1479,7 @@ class NozzleDesignGUI(QMainWindow):
             
             btn = QRadioButton(label)
             btn.setMinimumHeight(35)
-            btn.setToolTip(tooltip)
+            btn.setToolTip(f"<b>{label}</b><br/>{tooltip}")
             btn.setStyleSheet("""
                 QRadioButton {
                     font-weight: bold;
@@ -1344,8 +1501,28 @@ class NozzleDesignGUI(QMainWindow):
                 # Load available templates
                 templates = self.template_loader.list_templates()
                 self.template_combo.addItems(templates)
-                self.template_combo.setToolTip("Select predefined nozzle shape")
+                self.template_combo.setToolTip(
+                    "<b>Template Library</b><br/>"
+                    "Pick a predefined nozzle shape, then start drawing or refine parameters." )
                 self.template_combo.currentTextChanged.connect(self.on_template_selected)
+                # Improve popup list readability (avoid same fg/bg)
+                self.template_combo.setStyleSheet(f"""
+                    QComboBox {{
+                        background: {Theme.INPUT_BACKGROUND};
+                        color: {Theme.TEXT_PRIMARY};
+                        border: 1px solid {Theme.INPUT_BORDER};
+                        border-radius: 4px;
+                        padding: 4px 8px;
+                    }}
+                    QComboBox QAbstractItemView {{
+                        background: {Theme.SURFACE};
+                        color: {Theme.TEXT_PRIMARY};
+                        border: 1px solid {Theme.BORDER};
+                        selection-background-color: {Theme.PRIMARY};
+                        selection-color: {Theme.TEXT_INVERSE};
+                        outline: 0;
+                    }}
+                """)
                 container_layout.addWidget(self.template_combo)
             
             mode_layout.addWidget(container)
@@ -1355,13 +1532,15 @@ class NozzleDesignGUI(QMainWindow):
         controls_layout.addWidget(mode_group)
         
         # Enhanced geometry properties with validation
-        props_group = QGroupBox(" Geometry Properties")
+        props_group = QGroupBox("Geometry Properties")
         props_layout = QFormLayout(props_group)
         
         # Symmetry control
         self.symmetric_checkbox = QCheckBox("Symmetric Nozzle")
         self.symmetric_checkbox.setChecked(True)
-        self.symmetric_checkbox.setToolTip("Mirror geometry about centerline")
+        self.symmetric_checkbox.setToolTip(
+            "<b>Symmetric Nozzle</b><br/>"
+            "Mirrors the upper wall about the centerline to form the lower wall." )
         self.symmetric_checkbox.stateChanged.connect(self.on_symmetric_changed)
         props_layout.addRow(self.symmetric_checkbox)
         
@@ -1369,55 +1548,37 @@ class NozzleDesignGUI(QMainWindow):
         self.interpolation_points = QSpinBox()
         self.interpolation_points.setRange(20, 500)
         self.interpolation_points.setValue(100)
-        self.interpolation_points.setToolTip("Number of points for smooth curves")
+        self.interpolation_points.setToolTip(
+            "<b>Resolution</b><br/>"
+            "Number of interpolated points used to render curves and compute quick stats." )
         self.interpolation_points.valueChanged.connect(self.on_resolution_changed)
         props_layout.addRow("Resolution:", self.interpolation_points)
         
         # Snap controls
         self.snap_to_grid = QCheckBox("Snap to Grid")
-        self.snap_to_grid.setToolTip("Snap cursor to grid intersections")
+        self.snap_to_grid.setToolTip(
+            "<b>Snap to Grid</b><br/>"
+            "When enabled, drawn points will align to grid intersections." )
         props_layout.addRow(self.snap_to_grid)
         
         self.show_dimensions = QCheckBox("Show Dimensions")
         self.show_dimensions.setChecked(True)
-        self.show_dimensions.setToolTip("Display real-time measurements")
+        self.show_dimensions.setToolTip(
+            "<b>Show Dimensions</b><br/>"
+            "Displays quick distance annotations while designing geometry." )
         self.show_dimensions.stateChanged.connect(self.update_geometry_plot)
         props_layout.addRow(self.show_dimensions)
+
+        # Auto-connect behavior
+        self.auto_connect_elements = QCheckBox("Auto-connect new element")
+        self.auto_connect_elements.setChecked(False)
+        self.auto_connect_elements.setToolTip(
+            "<b>Auto-connect</b><br/>"
+            "When enabled, the next element will start from the previous element's end point.<br/>"
+            "When disabled, elements remain independent and are not visually connected." )
+        props_layout.addRow(self.auto_connect_elements)
         
         controls_layout.addWidget(props_group)
-        
-        # Smart editing tools
-        edit_group = QGroupBox("Editing Tools")
-        edit_layout = QGridLayout(edit_group)
-        
-        btn_select = QPushButton("Select")
-        btn_move = QPushButton("Move")
-        btn_modify = QPushButton("Modify")
-        btn_duplicate = QPushButton("Copy")
-        
-        btn_select.setToolTip("Select elements for editing")
-        btn_move.setToolTip("Move selected elements")
-        btn_modify.setToolTip("Modify element parameters")
-        btn_duplicate.setToolTip("Duplicate selected elements")
-        
-        # Connect editing tool buttons
-        btn_select.clicked.connect(lambda: self.set_editing_mode("select"))
-        btn_move.clicked.connect(lambda: self.set_editing_mode("move"))
-        btn_modify.clicked.connect(lambda: self.set_editing_mode("modify"))
-        btn_duplicate.clicked.connect(lambda: self.set_editing_mode("duplicate"))
-        
-        edit_layout.addWidget(btn_select, 0, 0)
-        edit_layout.addWidget(btn_move, 0, 1)
-        edit_layout.addWidget(btn_modify, 1, 0)
-        edit_layout.addWidget(btn_duplicate, 1, 1)
-        
-        for i in range(edit_layout.rowCount()):
-            for j in range(edit_layout.columnCount()):
-                item = edit_layout.itemAtPosition(i, j)
-                if item and item.widget():
-                    item.widget().setMinimumHeight(30)
-        
-        controls_layout.addWidget(edit_group)
         
         # Enhanced actions with validation feedback
         actions_group = QGroupBox("Actions")
@@ -1428,10 +1589,18 @@ class NozzleDesignGUI(QMainWindow):
         btn_validate = QPushButton("Validate")
         btn_optimize = QPushButton("[Quick] Optimize")
         
-        btn_clear.setToolTip("Clear all geometry")
-        btn_undo.setToolTip("Undo last element")
-        btn_validate.setToolTip("Check geometry validity")
-        btn_optimize.setToolTip("Optimize geometry for CFD")
+        btn_clear.setToolTip(
+            "<b>Clear Geometry</b><br/>"
+            "Removes all geometry elements from the project." )
+        btn_undo.setToolTip(
+            "<b>Undo</b><br/>"
+            "Removes the last-added element from the geometry." )
+        btn_validate.setToolTip(
+            "<b>Validate Geometry</b><br/>"
+            "Runs basic checks (monotonic x, non-negative radii, interpolation sanity)." )
+        btn_optimize.setToolTip(
+            "<b>Quick Optimize</b><br/>"
+            "Applies basic smoothing/cleanup steps (lightweight placeholder)." )
         
         btn_clear.clicked.connect(self.clear_geometry)
         btn_undo.clicked.connect(self.undo_last_element)
@@ -1446,7 +1615,9 @@ class NozzleDesignGUI(QMainWindow):
         # Add "Finish Geo" button
         self.finish_geo_btn = QPushButton("Finish Geo")
         self.finish_geo_btn.clicked.connect(self.finish_geometry)
-        self.finish_geo_btn.setToolTip("Complete geometry and proceed to meshing")
+        self.finish_geo_btn.setToolTip(
+            "<b>Finish Geometry</b><br/>"
+            "Validates the design and moves you to the Mesh Generation tab." )
         self.finish_geo_btn.setStyleSheet(f"""
             QPushButton {{
                 background: {Theme.SUCCESS};
@@ -1750,31 +1921,46 @@ TIP: Use Ctrl+Z for quick undo!
         """Plot current geometry on the given axis."""
         if not self.geometry.elements:
             return
-            
-        # Get interpolated points
-        x_coords, y_coords = self.geometry.get_interpolated_points(
-            num_points_per_element=self.interpolation_points.value()
-        )
-        
-        if x_coords and y_coords:
-            # Plot upper boundary
-            ax.plot(x_coords, y_coords, 'cyan', linewidth=3, alpha=0.9, label='Upper Boundary')
-            
-            # Plot symmetric lower boundary if enabled
-            if self.symmetric_checkbox.isChecked():
-                ax.plot(x_coords, [-y for y in y_coords], 'cyan', linewidth=3, alpha=0.9, label='Lower Boundary')
-                
-                # Fill nozzle area
-                ax.fill_between(x_coords, y_coords, [-y for y in y_coords], 
-                              alpha=0.2, color='cyan', label='Nozzle Volume')
-            
-            # Mark control points
-            for i, element in enumerate(self.geometry.elements):
-                if hasattr(element, 'control_points'):
-                    points = element.control_points
-                    x_ctrl = [p[0] for p in points]
-                    y_ctrl = [p[1] for p in points]
-                    ax.scatter(x_ctrl, y_ctrl, c='red', s=30, zorder=5, alpha=0.8)
+
+        n = self.interpolation_points.value() if hasattr(self, 'interpolation_points') else 100
+
+        def _connected_chain() -> bool:
+            if len(self.geometry.elements) < 2:
+                return True
+            try:
+                for i in range(len(self.geometry.elements) - 1):
+                    a = self.geometry.elements[i].get_points()[-1]
+                    b = self.geometry.elements[i + 1].get_points()[0]
+                    if abs(a[0] - b[0]) > 1e-9 or abs(a[1] - b[1]) > 1e-9:
+                        return False
+                return True
+            except Exception:
+                return False
+
+        # Plot each element separately to avoid unintended visual connections
+        any_plotted = False
+        for element in self.geometry.elements:
+            try:
+                pts = element.get_interpolated_points(n)
+                if not pts:
+                    continue
+                x_coords = [p[0] for p in pts]
+                y_coords = [p[1] for p in pts]
+                ax.plot(x_coords, y_coords, 'cyan', linewidth=3, alpha=0.9)
+                any_plotted = True
+
+                if self.symmetric_checkbox.isChecked():
+                    ax.plot(x_coords, [-y for y in y_coords], 'cyan', linewidth=3, alpha=0.9)
+            except Exception:
+                continue
+
+        # Fill only when the curve is continuous (or user explicitly enables auto-connect)
+        if any_plotted and self.symmetric_checkbox.isChecked() and (
+            (hasattr(self, 'auto_connect_elements') and self.auto_connect_elements.isChecked()) or _connected_chain()
+        ):
+            x_all, y_all = self.geometry.get_interpolated_points(num_points_per_element=n)
+            if x_all and y_all:
+                ax.fill_between(x_all, y_all, [-y for y in y_all], alpha=0.2, color='cyan', label='Nozzle Volume')
     
     def create_template_nozzle(self, x_pos, y_pos):
         """Create a nozzle from template."""
@@ -1842,6 +2028,23 @@ TIP: Use Ctrl+Z for quick undo!
             
         try:
             points = canvas.current_points.copy()
+
+            # Optional: auto-connect new element to previous endpoint
+            if hasattr(self, 'auto_connect_elements') and self.auto_connect_elements.isChecked() and self.geometry.elements:
+                try:
+                    last_elem = self.geometry.elements[-1]
+                    last_end = last_elem.get_points()[-1]
+
+                    if canvas.drawing_mode in ["Polynomial", "Line"] and points:
+                        points[0] = (float(last_end[0]), float(last_end[1]))
+                    elif canvas.drawing_mode == "Arc" and points:
+                        # Only snap arc start if user is already close
+                        dx = points[0][0] - last_end[0]
+                        dy = points[0][1] - last_end[1]
+                        if (dx * dx + dy * dy) ** 0.5 < 1e-3:
+                            points[0] = (float(last_end[0]), float(last_end[1]))
+                except Exception:
+                    pass
             
             # Create appropriate element based on mode
             if canvas.drawing_mode == "Polynomial":
@@ -1879,6 +2082,7 @@ TIP: Use Ctrl+Z for quick undo!
         """Update the main geometry plot."""
         if hasattr(self, 'geometry_canvas'):
             self.update_canvas_with_preview(self.geometry_canvas)
+        self.refresh_project_metadata()
     
     def clear_geometry(self):
         """Clear all geometry."""
@@ -2491,15 +2695,47 @@ TIP: Use Ctrl+Z for quick undo!
         self.solver_type = QComboBox()
         self.solver_type.addItems(["simpleFoam", "rhoSimpleFoam", "sonicFoam"])
         self.solver_type.setCurrentText("simpleFoam")
+        self.solver_type.currentTextChanged.connect(self._on_solver_type_changed)
         
         self.max_iterations = QSpinBox()
-        self.max_iterations.setRange(100, 10000)
+        self.max_iterations.setRange(100, 100000)
         self.max_iterations.setValue(1000)
+        self.max_iterations.setToolTip("Maximum iterations (steady) or max timesteps (transient)")
         
         self.convergence_tolerance = QDoubleSpinBox()
         self.convergence_tolerance.setRange(1e-8, 1e-3)
         self.convergence_tolerance.setValue(1e-6)
         self.convergence_tolerance.setDecimals(8)
+        
+        # Time stepping controls (for transient solvers)
+        self.time_step = QDoubleSpinBox()
+        self.time_step.setRange(1e-9, 1.0)
+        self.time_step.setValue(1e-6)
+        self.time_step.setDecimals(9)
+        self.time_step.setToolTip("Initial time step (s). For compressible solvers, this is adjusted automatically.")
+        
+        self.end_time = QDoubleSpinBox()
+        self.end_time.setRange(1e-6, 1000.0)
+        self.end_time.setValue(0.01)
+        self.end_time.setDecimals(6)
+        self.end_time.setToolTip("Simulation end time (s)")
+        
+        self.max_courant = QDoubleSpinBox()
+        self.max_courant.setRange(0.1, 10.0)
+        self.max_courant.setValue(0.5)
+        self.max_courant.setDecimals(2)
+        self.max_courant.setToolTip("Maximum Courant number for adaptive time stepping")
+        
+        # PIMPLE iteration controls
+        self.n_outer_correctors = QSpinBox()
+        self.n_outer_correctors.setRange(1, 20)
+        self.n_outer_correctors.setValue(2)
+        self.n_outer_correctors.setToolTip("PIMPLE outer iterations per timestep")
+        
+        self.n_correctors = QSpinBox()
+        self.n_correctors.setRange(1, 10)
+        self.n_correctors.setValue(2)
+        self.n_correctors.setToolTip("Pressure corrector steps per outer iteration")
         
         self.n_processors = QSpinBox()
         self.n_processors.setRange(1, 64)
@@ -2511,16 +2747,46 @@ TIP: Use Ctrl+Z for quick undo!
         self.decomposition_method.setCurrentText("scotch")
         self.decomposition_method.setToolTip("Domain decomposition method for parallel runs")
         
-        solver_layout.addWidget(QLabel("Solver:"), 0, 0)
-        solver_layout.addWidget(self.solver_type, 0, 1)
-        solver_layout.addWidget(QLabel("Max Iterations:"), 1, 0)
-        solver_layout.addWidget(self.max_iterations, 1, 1)
-        solver_layout.addWidget(QLabel("Convergence Tolerance:"), 2, 0)
-        solver_layout.addWidget(self.convergence_tolerance, 2, 1)
-        solver_layout.addWidget(QLabel("Number of Processors:"), 3, 0)
-        solver_layout.addWidget(self.n_processors, 3, 1)
-        solver_layout.addWidget(QLabel("Decomposition Method:"), 4, 0)
-        solver_layout.addWidget(self.decomposition_method, 4, 1)
+        # Labels for transient settings (to show/hide)
+        self.lbl_time_step = QLabel("Time Step [s]:")
+        self.lbl_end_time = QLabel("End Time [s]:")
+        self.lbl_max_courant = QLabel("Max Courant:")
+        self.lbl_outer_correctors = QLabel("Outer Iterations:")
+        self.lbl_correctors = QLabel("Pressure Correctors:")
+        
+        row = 0
+        solver_layout.addWidget(QLabel("Solver:"), row, 0)
+        solver_layout.addWidget(self.solver_type, row, 1)
+        row += 1
+        solver_layout.addWidget(QLabel("Max Iterations/Steps:"), row, 0)
+        solver_layout.addWidget(self.max_iterations, row, 1)
+        row += 1
+        solver_layout.addWidget(QLabel("Convergence Tolerance:"), row, 0)
+        solver_layout.addWidget(self.convergence_tolerance, row, 1)
+        row += 1
+        solver_layout.addWidget(self.lbl_time_step, row, 0)
+        solver_layout.addWidget(self.time_step, row, 1)
+        row += 1
+        solver_layout.addWidget(self.lbl_end_time, row, 0)
+        solver_layout.addWidget(self.end_time, row, 1)
+        row += 1
+        solver_layout.addWidget(self.lbl_max_courant, row, 0)
+        solver_layout.addWidget(self.max_courant, row, 1)
+        row += 1
+        solver_layout.addWidget(self.lbl_outer_correctors, row, 0)
+        solver_layout.addWidget(self.n_outer_correctors, row, 1)
+        row += 1
+        solver_layout.addWidget(self.lbl_correctors, row, 0)
+        solver_layout.addWidget(self.n_correctors, row, 1)
+        row += 1
+        solver_layout.addWidget(QLabel("Number of Processors:"), row, 0)
+        solver_layout.addWidget(self.n_processors, row, 1)
+        row += 1
+        solver_layout.addWidget(QLabel("Decomposition Method:"), row, 0)
+        solver_layout.addWidget(self.decomposition_method, row, 1)
+        
+        # Initialize visibility based on default solver
+        self._on_solver_type_changed(self.solver_type.currentText())
         
         controls_layout.addWidget(solver_group)
         
@@ -2607,6 +2873,28 @@ TIP: Use Ctrl+Z for quick undo!
         
     def create_postprocessing_tab(self):
         """Create post-processing tab with visualization controls."""
+        # Main container with sub-tabs for different postprocessing modes
+        main_tab = QWidget()
+        main_layout = QVBoxLayout(main_tab)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        
+        # Sub-tab widget for different postprocessing modes
+        sub_tabs = QTabWidget()
+        
+        # === Interactive Analyzer Tab (NEW) ===
+        self.interactive_postprocessor = InteractivePostprocessorWidget(theme=Theme)
+        sub_tabs.addTab(self.interactive_postprocessor, "🔍 Interactive Analyzer")
+        
+        # === Standard Results Tab ===
+        standard_tab = self._create_standard_postprocessing_widget()
+        sub_tabs.addTab(standard_tab, "📊 Standard View")
+        
+        main_layout.addWidget(sub_tabs)
+        
+        return main_tab
+        
+    def _create_standard_postprocessing_widget(self):
+        """Create the standard post-processing widget (original implementation)."""
         tab = QWidget()
         layout = QHBoxLayout(tab)
         
@@ -2821,16 +3109,39 @@ TIP: Use Ctrl+Z for quick undo!
             
         try:
             from core.modules.mesh_generator import MeshParameters, AdvancedMeshGenerator
+
+            def _bl_total_thickness(first: float, growth: float, n_layers: int) -> float:
+                if n_layers <= 0:
+                    return 0.0
+                if growth is None or abs(growth - 1.0) < 1e-12:
+                    return float(first) * float(n_layers)
+                # Geometric series: first + first*r + ... first*r^(n-1)
+                return float(first) * (float(growth) ** float(n_layers) - 1.0) / (float(growth) - 1.0)
             
             # Create mesh parameters from GUI
             params = MeshParameters()
-            params.element_size = self.global_size.value()
-            params.min_element_size = self.wall_size.value()
+            params.element_size = float(self.global_size.value())
+            params.min_element_size = float(self.wall_size.value())
+            # Keep max size consistent with the global size, but never below min.
+            params.max_element_size = max(params.element_size, params.min_element_size * 2.0)
+
             params.boundary_layer_enabled = self.enable_bl.isChecked()
-            params.boundary_layer_elements = self.num_bl_layers.value()
-            params.boundary_layer_thickness = self.first_layer_thickness.value()
-            params.boundary_layer_growth_rate = self.growth_ratio.value()
-            params.domain_extension = self.farfield_distance.value()
+
+            params.boundary_layer_elements = int(self.num_bl_layers.value())
+            params.boundary_layer_growth_rate = float(self.growth_ratio.value())
+
+            # UI provides first-layer thickness; MeshParameters stores total thickness.
+            first = float(self.first_layer_thickness.value())
+            total = _bl_total_thickness(first, params.boundary_layer_growth_rate, params.boundary_layer_elements)
+            params.boundary_layer_first_layer = first
+            params.boundary_layer_thickness = total
+
+            params.domain_extension = float(self.farfield_distance.value())
+
+            # Use quality threshold as a proxy for mesh smoothing aggressiveness.
+            # Higher threshold => more smoothing attempts.
+            qt = float(self.quality_threshold.value())
+            params.mesh_smoothing = 10 if qt >= 0.6 else 3
             
             # Generate mesh
             generator = AdvancedMeshGenerator()
@@ -2843,7 +3154,12 @@ TIP: Use Ctrl+Z for quick undo!
                 self.mesh_generator = generator  # Store generator for export functionality
                 
                 # Update stats display
-                stats = mesh_data.get('stats', {})
+                # Prefer generator-calculated stats when available.
+                stats = {}
+                if hasattr(generator, 'get_mesh_statistics'):
+                    stats = generator.get_mesh_statistics() or {}
+                if not stats:
+                    stats = mesh_data.get('stats', {})
                 self.display_mesh_stats(stats)
                 
                 # Update visualization (pass mesh data instead of file)
@@ -2853,8 +3169,13 @@ TIP: Use Ctrl+Z for quick undo!
                 # Show success message with mesh statistics
                 num_nodes = stats.get('num_nodes', 0)
                 num_elements = stats.get('num_elements', 0)
-                QMessageBox.information(self, "Mesh Generation", 
-                    f"Mesh generated successfully!\nNodes: {num_nodes}\nElements: {num_elements}")
+                msg = f"Mesh generated successfully!\nNodes: {num_nodes}\nElements: {num_elements}"
+
+                # Warn if mesh quality is below requested threshold (best-effort).
+                mesh_quality = stats.get('mesh_quality', None)
+                if isinstance(mesh_quality, (int, float)) and mesh_quality < qt:
+                    msg += f"\n\nWarning: estimated mesh quality ({mesh_quality:.2f}) < threshold ({qt:.2f})."
+                QMessageBox.information(self, "Mesh Generation", msg)
             else:
                 QMessageBox.warning(self, "Mesh Generation", "Mesh generation failed")
                 
@@ -2870,7 +3191,7 @@ TIP: Use Ctrl+Z for quick undo!
                 
             if self.mesh_generator and hasattr(self.mesh_generator, 'analyze_mesh_quality'):
                 # Analyze mesh quality using the mesh generator
-                quality_stats = self.mesh_generator.analyze_mesh_quality()
+                quality_stats = self.mesh_generator.analyze_mesh_quality(self.current_mesh_data)
                 
                 if quality_stats:
                     analysis_text = f"""Mesh Quality Analysis:
@@ -3023,12 +3344,14 @@ Quality Assessment:
                     return f"{value:{format_str}}"
                 return default
             
+            # Accept either legacy (min/avg quality) or new mesh_quality stats.
             text = f"""Mesh Statistics:
 • Total elements: {stats.get('num_elements', 'N/A')}
 • Total nodes: {stats.get('num_nodes', 'N/A')}
-• Min quality: {safe_format(stats.get('min_quality'), 'N/A', '.3f')}
-• Average quality: {safe_format(stats.get('avg_quality'), 'N/A', '.3f')}
-• Aspect ratio: {safe_format(stats.get('aspect_ratio'), 'N/A', '.2f')}
+• Mesh quality: {safe_format(stats.get('mesh_quality'), safe_format(stats.get('avg_quality')), '.3f')}
+• Avg element size: {safe_format(stats.get('avg_element_size'), 'N/A', '.4f')}
+• Min element size: {safe_format(stats.get('min_element_size'), 'N/A', '.4f')}
+• Max element size: {safe_format(stats.get('max_element_size'), 'N/A', '.4f')}
 """
             self.mesh_stats.setText(text)
         
@@ -3158,7 +3481,12 @@ Quality Assessment:
             return
             
         try:
-            from core.modules.simulation_setup import SimulationSetup, BoundaryCondition, BoundaryType
+            from core.modules.simulation_setup import (
+                SimulationSetup,
+                BoundaryCondition,
+                BoundaryType,
+                SolverType,
+            )
             
             # Create boundary conditions from GUI
             inlet_bc = BoundaryCondition(
@@ -3188,6 +3516,10 @@ Quality Assessment:
             # Setup simulation
             sim_setup = SimulationSetup()
             sim_setup.case_directory = self.case_directory.text()
+
+            # Fluid / operating conditions
+            sim_setup.fluid_properties.temperature = float(self.temperature.value())
+            sim_setup.fluid_properties.pressure = float(self.inlet_pressure.value())
             
             # Debug: Check mesh_data availability
             mesh_data = getattr(self, 'mesh_data', None)
@@ -3196,10 +3528,48 @@ Quality Assessment:
                 print(f"DEBUG Frontend: mesh_data keys: {mesh_data.keys()}")
             
             # Configure solver settings
+            solver_name = self.solver_type.currentText().strip()
+            try:
+                sim_setup.solver_settings.solver_type = SolverType(solver_name)
+            except Exception:
+                sim_setup.solver_settings.solver_type = SolverType.SIMPLE_FOAM
+
             sim_setup.solver_settings.n_processors = self.n_processors.value()
             sim_setup.solver_settings.decomposition_method = self.decomposition_method.currentText()
             sim_setup.solver_settings.convergence_tolerance = self.convergence_tolerance.value()
-            # Note: max_iterations would need to be added to SolverSettings if needed
+            sim_setup.solver_settings.max_iterations = int(self.max_iterations.value())
+
+            # Transient solvers: pisoFoam, pimpleFoam, sonicFoam
+            is_transient = solver_name in ("pisoFoam", "pimpleFoam", "sonicFoam")
+            is_compressible = solver_name in ("rhoSimpleFoam", "sonicFoam")
+            
+            if is_transient:
+                # Use GUI values for transient solver settings
+                sim_setup.solver_settings.time_step = self.time_step.value()
+                sim_setup.solver_settings.end_time = self.end_time.value()
+                sim_setup.solver_settings.n_outer_correctors = self.n_outer_correctors.value()
+                sim_setup.solver_settings.n_correctors = self.n_correctors.value()
+                sim_setup.solver_settings.write_interval = max(1, int(self.max_iterations.value() // 10))
+                
+                if is_compressible:
+                    sim_setup.solver_settings.max_courant = self.max_courant.value()
+                    sim_setup.solver_settings.adjust_time_step = True
+            else:
+                # Steady-state solvers: interpret max iterations as endTime
+                sim_setup.solver_settings.time_step = 1.0
+                sim_setup.solver_settings.end_time = float(sim_setup.solver_settings.max_iterations)
+                sim_setup.solver_settings.write_interval = max(1, int(sim_setup.solver_settings.max_iterations // 10))
+                sim_setup.solver_settings.adjust_time_step = False
+
+            # Turbulence model
+            turb_name = self.turbulence_model.currentText().strip()
+            if turb_name.lower() == "laminar":
+                sim_setup.turbulence_model.enabled = False
+                sim_setup.fluid_properties.turbulent = False
+            else:
+                sim_setup.turbulence_model.enabled = True
+                sim_setup.fluid_properties.turbulent = True
+                sim_setup.turbulence_model.model_type = turb_name
             
             # Add boundary conditions
             sim_setup.add_boundary_condition(inlet_bc)
@@ -3232,14 +3602,33 @@ Quality Assessment:
             from core.openfoam_runner import OpenFOAMRunner
             
             runner = OpenFOAMRunner(self.current_case_directory)
+
+            ok, msg = runner.validate_case()
+            if not ok:
+                self.simulation_log.append(f"[X] Preflight failed: {msg}")
+                QMessageBox.warning(self, "Run Simulation", f"Preflight failed:\n{msg}\n\nPlease click 'Setup Case Files' again.")
+                return
             
+            # Determine solver from generated controlDict (source of truth)
+            configured_solver = runner.get_application_from_control_dict()
+            if not configured_solver:
+                self.simulation_log.append("[X] Could not read solver from system/controlDict")
+                QMessageBox.warning(self, "Run Simulation", "Could not read solver from system/controlDict. Please click 'Setup Case Files' again.")
+                return
+
+            selected_solver = self.solver_type.currentText().strip()
+            if selected_solver and selected_solver != configured_solver:
+                self.simulation_log.append(f"[X] Solver mismatch: UI='{selected_solver}' vs controlDict='{configured_solver}'")
+                QMessageBox.warning(self, "Run Simulation", "Solver mismatch between UI and generated case files.\n\nClick 'Setup Case Files' again (or select the solver that matches the case).")
+                return
+
             # Run blockMesh first
             self.simulation_log.append(" Running blockMesh...")
             if runner.block_mesh():
                 self.simulation_log.append("[OK] blockMesh completed successfully")
             else:
                 self.simulation_log.append("[X] blockMesh failed")
-                QMessageBox.warning(self, "Simulation Error", "Mesh generation failed. Check case setup.")
+                QMessageBox.warning(self, "Simulation Error", "Mesh generation failed or blockMesh not available. Check logs.")
                 return
             
             # Check if parallel processing is needed
@@ -3253,8 +3642,8 @@ Quality Assessment:
                     QMessageBox.warning(self, "Simulation Error", "Domain decomposition failed. Check case setup.")
                     return
             
-            # Run solver
-            solver = self.solver_type.currentText()
+            # Run solver (use solver configured in controlDict)
+            solver = configured_solver
             if n_procs > 1:
                 self.simulation_log.append(f" Running {solver} in parallel on {n_procs} processors...")
             else:
@@ -3365,6 +3754,23 @@ Quality Assessment:
                     
         except Exception as e:
             QMessageBox.critical(self, "Stop Error", f"Failed to stop simulation: {str(e)}")
+    
+    def _on_solver_type_changed(self, solver_name: str):
+        """Update UI visibility based on solver type."""
+        # Transient solvers: pisoFoam, pimpleFoam, sonicFoam
+        is_transient = solver_name in ("pisoFoam", "pimpleFoam", "sonicFoam")
+        is_compressible = solver_name in ("rhoSimpleFoam", "sonicFoam")
+        
+        # Show/hide transient controls
+        for widget in [self.lbl_time_step, self.time_step,
+                       self.lbl_end_time, self.end_time,
+                       self.lbl_outer_correctors, self.n_outer_correctors,
+                       self.lbl_correctors, self.n_correctors]:
+            widget.setVisible(is_transient)
+        
+        # Max Courant only for compressible transient
+        for widget in [self.lbl_max_courant, self.max_courant]:
+            widget.setVisible(is_transient and is_compressible)
         
     def browse_case_directory(self):
         """Browse for case directory."""
@@ -4477,6 +4883,9 @@ Generated by: Nozzle CFD Design Tool v1.0.0
                 self.canvas.current_points = []
                 self.update_canvas(self.canvas)
             self.update_workflow_status()
+            self.current_file = None
+            self.current_case_directory = ""
+            self.refresh_project_metadata()
             QMessageBox.information(self, "New Project", "New project created!")
     
     def open_project(self):
@@ -4523,6 +4932,7 @@ Generated by: Nozzle CFD Design Tool v1.0.0
                 self.current_file = file_path
                 self.is_modified = False
                 self.update_workflow_status()
+                self.refresh_project_metadata()
                 
                 QMessageBox.information(self, "Open Project", f"Project loaded successfully from:\n{file_path}")
                 
@@ -4566,6 +4976,7 @@ Generated by: Nozzle CFD Design Tool v1.0.0
                 
                 self.current_file = file_path
                 self.is_modified = False
+                self.refresh_project_metadata()
                 
                 QMessageBox.information(self, "Save Project", f"Project saved successfully to:\n{file_path}")
                 
@@ -4625,6 +5036,7 @@ Generated by: Nozzle CFD Design Tool v1.0.0
                 
                 self.current_case_directory = case_dir
                 self.update_workflow_status()
+                self.refresh_project_metadata()
                 
                 QMessageBox.information(self, "Export Case", f"OpenFOAM case exported successfully to:\n{case_dir}")
                 

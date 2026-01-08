@@ -28,14 +28,23 @@ import os
 sys.path.insert(0, os.path.dirname(__file__))
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'src'))
 
+# Fix for Wayland/Qt platform issues on Linux
+# Try platforms in order: wayland, xcb, offscreen
+if sys.platform == 'linux' and 'QT_QPA_PLATFORM' not in os.environ:
+    # Don't force a platform - let Qt choose, but suppress wayland warning
+    os.environ.setdefault('QT_LOGGING_RULES', 'qt.qpa.plugin=false')
+
 def main():
     """Launch the nozzle CFD design tool."""
     try:
         from PySide6.QtWidgets import QApplication
-        from frontend import NozzleDesignGUI
+        from PySide6.QtCore import Qt
         
-        # Create QApplication
+        # Create QApplication first
         app = QApplication(sys.argv)
+        
+        # Import GUI after QApplication is created
+        from frontend import NozzleDesignGUI
         
         # Create and show main window
         window = NozzleDesignGUI()
@@ -46,12 +55,16 @@ def main():
         
     except ImportError as e:
         print(f"❌ Import error: {e}")
+        import traceback
+        traceback.print_exc()
         print("Please ensure all dependencies are installed:")
         print("  conda install pyside6 matplotlib numpy scipy")
         print("  pip install gmsh")
         return 1
     except Exception as e:
         print(f"❌ Application error: {e}")
+        import traceback
+        traceback.print_exc()
         return 1
 
 if __name__ == "__main__":

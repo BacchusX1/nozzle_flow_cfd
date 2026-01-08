@@ -29,8 +29,11 @@ class MeshParameters:
         
         # Boundary layer parameters
         self.boundary_layer_enabled = True
+        # Total boundary-layer thickness (normal to wall)
         self.boundary_layer_thickness = 0.01
         self.boundary_layer_elements = 5
+        # First layer thickness at the wall (used when growth rate > 1)
+        self.boundary_layer_first_layer = self.boundary_layer_thickness / self.boundary_layer_elements
         self.boundary_layer_growth_rate = 1.2
         
         # Mesh quality parameters
@@ -254,7 +257,12 @@ class AdvancedMeshGenerator:
             # Set boundary layer parameters
             gmsh.model.mesh.field.setNumbers(field_tag, "EdgesList", [e[1] for e in wall_entities])
             gmsh.model.mesh.field.setNumber(field_tag, "hfar", self.parameters.element_size)
-            gmsh.model.mesh.field.setNumber(field_tag, "hwall_n", self.parameters.boundary_layer_thickness / self.parameters.boundary_layer_elements)
+            first = getattr(
+                self.parameters,
+                'boundary_layer_first_layer',
+                self.parameters.boundary_layer_thickness / max(1, self.parameters.boundary_layer_elements)
+            )
+            gmsh.model.mesh.field.setNumber(field_tag, "hwall_n", float(first))
             gmsh.model.mesh.field.setNumber(field_tag, "ratio", self.parameters.boundary_layer_growth_rate)
             gmsh.model.mesh.field.setNumber(field_tag, "thickness", self.parameters.boundary_layer_thickness)
             

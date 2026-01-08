@@ -28,6 +28,27 @@ class SolverType(Enum):
     PISO_FOAM = "pisoFoam"
     PIMPLE_FOAM = "pimpleFoam"
     RHOSIMPLE_FOAM = "rhoSimpleFoam"
+    SONIC_FOAM = "sonicFoam"
+
+
+def _is_transient_solver(solver_type: SolverType) -> bool:
+    return solver_type in (SolverType.PISO_FOAM, SolverType.PIMPLE_FOAM, SolverType.SONIC_FOAM)
+
+
+def _is_compressible_solver(solver_type: SolverType) -> bool:
+    """Check if solver requires compressible flow properties."""
+    return solver_type in (SolverType.RHOSIMPLE_FOAM, SolverType.SONIC_FOAM)
+
+
+def _turbulence_fields(model: 'TurbulenceModel') -> List[str]:
+    if not model.enabled:
+        return []
+    if model.model_type == "kOmegaSST":
+        return ["k", "omega"]
+    if model.model_type == "SpalartAllmaras":
+        return ["nuTilda"]
+    # Default to k-epsilon
+    return ["k", "epsilon"]
 
 
 @dataclass
@@ -74,6 +95,15 @@ class SolverSettings:
     time_step: float = 0.001
     end_time: float = 1.0
     write_interval: int = 100
+    
+    # PIMPLE/transient solver settings
+    n_outer_correctors: int = 2  # PIMPLE outer iterations per timestep
+    n_correctors: int = 2  # Pressure corrector steps
+    n_non_orthogonal_correctors: int = 0  # Non-orthogonal mesh corrections
+    
+    # Compressible solver settings  
+    max_courant: float = 0.5  # Maximum Courant number for adjustable timestep
+    adjust_time_step: bool = True  # Enable adaptive time stepping
     
     # Parallel processing
     n_processors: int = 1  # Number of CPU cores to use (1 = serial)
@@ -196,6 +226,10 @@ class SimulationSetup:
         self._write_transport_properties()
         self._write_turbulence_properties()
         
+        # Generate thermophysical properties for compressible solvers
+        if _is_compressible_solver(self.solver_settings.solver_type):
+            self._write_thermophysical_properties()
+        
         # Generate initial conditions
         self._write_initial_conditions()
         
@@ -229,6 +263,28 @@ class SimulationSetup:
             
     def _write_control_dict(self):
         """Write system/controlDict file."""
+        is_compressible = _is_compressible_solver(self.solver_settings.solver_type)
+        is_transient = _is_transient_solver(self.solver_settings.solver_type)
+        
+        # Compressible solvers need adjustable time stepping for stability
+        if is_compressible and self.solver_settings.adjust_time_step:
+            time_control = f"""deltaT          {self.solver_settings.time_step};
+
+adjustTimeStep  yes;
+
+maxCo           {self.solver_settings.max_courant};
+
+writeControl    adjustableRunTime;"""
+        elif is_transient:
+            time_control = f"""deltaT          {self.solver_settings.time_step};
+
+writeControl    runTime;"""
+        else:
+            # Steady-state solvers use iteration count as pseudo-time
+            time_control = f"""deltaT          1;
+
+writeControl    timeStep;"""
+            
         content = f"""/*--------------------------------*- C++ -*----------------------------------*\\
 | =========                 |                                                 |
 | \\\\      /  F ield         | OpenFOAM: The Open Source CFD Toolbox           |
@@ -256,9 +312,7 @@ stopAt          endTime;
 
 endTime         {self.solver_settings.end_time};
 
-deltaT          {self.solver_settings.time_step};
-
-writeControl    runTime;
+{time_control}
 
 writeInterval   {self.solver_settings.write_interval * self.solver_settings.time_step};
 
@@ -284,7 +338,38 @@ runTimeModifiable true;
             
     def _write_fv_schemes(self):
         """Write system/fvSchemes file."""
-        content = """/*--------------------------------*- C++ -*----------------------------------*\\
+        ddt_default = "Euler" if _is_transient_solver(self.solver_settings.solver_type) else "steadyState"
+        is_compressible = _is_compressible_solver(self.solver_settings.solver_type)
+
+        turb_fields = _turbulence_fields(self.turbulence_model)
+        div_turb_lines = ""
+        if "k" in turb_fields:
+            div_turb_lines += "    div(phi,k)      bounded Gauss upwind;\n"
+        if "epsilon" in turb_fields:
+            div_turb_lines += "    div(phi,epsilon) bounded Gauss upwind;\n"
+        if "omega" in turb_fields:
+            div_turb_lines += "    div(phi,omega)  bounded Gauss upwind;\n"
+        if "nuTilda" in turb_fields:
+            div_turb_lines += "    div(phi,nuTilda) bounded Gauss upwind;\n"
+        
+        # Add energy equation schemes for compressible solvers
+        div_energy_lines = ""
+        if is_compressible:
+            div_energy_lines = """    div(phi,e)      bounded Gauss upwind;
+    div(phi,K)      bounded Gauss upwind;
+    div(phid,p)     Gauss upwind;
+    div(phiv,p)     Gauss upwind;
+    div(phi,Ekp)    bounded Gauss upwind;
+"""
+
+        # Divergence scheme for turbulence stress - different for compressible vs incompressible
+        if is_compressible:
+            div_stress = """    div((nuEff*dev2(T(grad(U))))) Gauss linear;
+    div(((rho*nuEff)*dev2(T(grad(U))))) Gauss linear;"""
+        else:
+            div_stress = "    div((nuEff*dev2(T(grad(U))))) Gauss linear;"
+
+        content = f"""/*--------------------------------*- C++ -*----------------------------------*\\
 | =========                 |                                                 |
 | \\\\      /  F ield         | OpenFOAM: The Open Source CFD Toolbox           |
 |  \\\\    /   O peration     | Version:  v2012                                 |
@@ -292,55 +377,55 @@ runTimeModifiable true;
 |    \\\\/     M anipulation  |                                                 |
 \\*---------------------------------------------------------------------------*/
 FoamFile
-{
+{{
     version     2.0;
     format      ascii;
     class       dictionary;
     location    "system";
     object      fvSchemes;
-}
+}}
 // * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
 
 ddtSchemes
-{
-    default         steadyState;
-}
+{{
+    default         {ddt_default};
+}}
 
 gradSchemes
-{
+{{
     default         Gauss linear;
     grad(p)         Gauss linear;
     grad(U)         Gauss linear;
-}
+}}
 
 divSchemes
-{
+{{
     default         none;
     div(phi,U)      bounded Gauss linearUpwind grad(U);
-    div(phi,k)      bounded Gauss upwind;
-    div(phi,epsilon) bounded Gauss upwind;
-    div((nuEff*dev2(T(grad(U))))) Gauss linear;
-}
+{div_turb_lines.rstrip()}
+{div_energy_lines.rstrip()}
+{div_stress}
+}}
 
 laplacianSchemes
-{
+{{
     default         Gauss linear orthogonal;
-}
+}}
 
 interpolationSchemes
-{
+{{
     default         linear;
-}
+}}
 
 snGradSchemes
-{
+{{
     default         orthogonal;
-}
+}}
 
 wallDist
-{
+{{
     method meshWave;
-}
+}}
 
 // ************************************************************************* //
 """
@@ -350,6 +435,83 @@ wallDist
             
     def _write_fv_solution(self):
         """Write system/fvSolution file."""
+        turb_fields = _turbulence_fields(self.turbulence_model)
+        is_transient = _is_transient_solver(self.solver_settings.solver_type)
+        is_compressible = _is_compressible_solver(self.solver_settings.solver_type)
+        
+        turbulence_solvers = ""
+        for field in turb_fields:
+            turbulence_solvers += f"""\n    {field}\n    {{\n        solver          {self.solver_settings.turbulence_solver};\n        smoother        symGaussSeidel;\n        tolerance       {self.solver_settings.convergence_tolerance};\n        relTol          0.01;\n    }}\n"""
+
+        # Energy field solver for compressible solvers
+        energy_solver = ""
+        rho_solver = ""
+        if is_compressible:
+            energy_solver = f"""
+    e
+    {{
+        solver          {self.solver_settings.velocity_solver};
+        smoother        symGaussSeidel;
+        tolerance       {self.solver_settings.convergence_tolerance};
+        relTol          0.01;
+    }}
+"""
+            rho_solver = """
+    rho
+    {
+        solver          diagonal;
+    }
+
+    rhoFinal
+    {
+        solver          diagonal;
+    }
+"""
+
+        # Final solvers for PIMPLE
+        final_solvers = ""
+        if is_transient:
+            final_solvers = f"""
+    "(U|e|k|omega|epsilon)Final"
+    {{
+        $U;
+        relTol          0;
+    }}
+
+    pFinal
+    {{
+        $p;
+        relTol          0;
+    }}
+"""
+
+        residual_lines = ""
+        if self.turbulence_model.enabled:
+            for field in turb_fields:
+                residual_lines += f"""
+        {field}
+        {{
+            tolerance {self.solver_settings.convergence_tolerance};
+            relTol 0;
+        }}"""
+
+        if is_compressible:
+            residual_lines += f"""
+        e
+        {{
+            tolerance {self.solver_settings.convergence_tolerance};
+            relTol 0;
+        }}"""
+
+        relax_equations_lines = ""
+        if self.turbulence_model.enabled:
+            for field in turb_fields:
+                relax_equations_lines += f"        {field:<15}{self.solver_settings.turbulence_relaxation};\n"
+        
+        # Add energy relaxation for compressible solvers
+        if is_compressible:
+            relax_equations_lines += f"        e               0.5;\n"
+
         content = f"""/*--------------------------------*- C++ -*----------------------------------*\\
 | =========                 |                                                 |
 | \\\\      /  F ield         | OpenFOAM: The Open Source CFD Toolbox           |
@@ -383,7 +545,7 @@ solvers
         agglomerator    faceAreaPair;
         mergeLevels     1;
     }}
-
+{rho_solver.rstrip()}
     U
     {{
         solver          {self.solver_settings.velocity_solver};
@@ -391,35 +553,30 @@ solvers
         tolerance       {self.solver_settings.convergence_tolerance};
         relTol          0.01;
     }}
-
-    k
-    {{
-        solver          {self.solver_settings.turbulence_solver};
-        smoother        symGaussSeidel;
-        tolerance       {self.solver_settings.convergence_tolerance};
-        relTol          0.01;
-    }}
-
-    epsilon
-    {{
-        solver          {self.solver_settings.turbulence_solver};
-        smoother        symGaussSeidel;
-        tolerance       {self.solver_settings.convergence_tolerance};
-        relTol          0.01;
-    }}
+{energy_solver.rstrip()}
+{turbulence_solvers.rstrip()}
+{final_solvers.rstrip()}
 }}
 
-SIMPLE
+{"PIMPLE" if is_transient else "SIMPLE"}
 {{
-    nNonOrthogonalCorrectors 0;
-    consistent      yes;
+    {"nOuterCorrectors    " + str(self.solver_settings.n_outer_correctors) + ";" if is_transient else ""}
+    nNonOrthogonalCorrectors {self.solver_settings.n_non_orthogonal_correctors};
+    {"nCorrectors         " + str(self.solver_settings.n_correctors) + ";" if is_transient else "consistent      yes;"}
 
     residualControl
     {{
-        p               {self.solver_settings.convergence_tolerance};
-        U               {self.solver_settings.convergence_tolerance};
-        k               {self.solver_settings.convergence_tolerance};
-        epsilon         {self.solver_settings.convergence_tolerance};
+        p
+        {{
+            tolerance {self.solver_settings.convergence_tolerance};
+            relTol 0;
+        }}
+        U
+        {{
+            tolerance {self.solver_settings.convergence_tolerance};
+            relTol 0;
+        }}
+{residual_lines.rstrip()}
     }}
 }}
 
@@ -432,8 +589,7 @@ relaxationFactors
     equations
     {{
         U               {self.solver_settings.velocity_relaxation};
-        k               {self.solver_settings.turbulence_relaxation};
-        epsilon         {self.solver_settings.turbulence_relaxation};
+{relax_equations_lines.rstrip()}
     }}
 }}
 
@@ -509,7 +665,12 @@ RAS
 
     printCoeffs     on;
 
-    {self.turbulence_model.model_type}Coeffs
+"""
+
+            if self.turbulence_model.model_type == "kEpsilon":
+                content += f"""
+
+    kEpsilonCoeffs
     {{
         Cmu             {self.turbulence_model.cmu};
         C1              {self.turbulence_model.c1};
@@ -517,12 +678,70 @@ RAS
         sigmaK          {self.turbulence_model.sigma_k};
         sigmaEps        {self.turbulence_model.sigma_epsilon};
     }}
-}}
+"""
+
+            content += """
+}
 """
 
         content += "\n// ************************************************************************* //\n"
         
         with open(os.path.join(self.case_directory, "constant", "turbulenceProperties"), 'w') as f:
+            f.write(content)
+    
+    def _write_thermophysical_properties(self):
+        """Write constant/thermophysicalProperties file for compressible solvers."""
+        # For ideal gas (air) properties
+        content = f"""/*--------------------------------*- C++ -*----------------------------------*\\
+| =========                 |                                                 |
+| \\\\      /  F ield         | OpenFOAM: The Open Source CFD Toolbox           |
+|  \\\\    /   O peration     | Version:  v2012                                 |
+|   \\\\  /    A nd           | Website:  www.openfoam.com                      |
+|    \\\\/     M anipulation  |                                                 |
+\\*---------------------------------------------------------------------------*/
+FoamFile
+{{
+    version     2.0;
+    format      ascii;
+    class       dictionary;
+    location    "constant";
+    object      thermophysicalProperties;
+}}
+// * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
+
+thermoType
+{{
+    type            hePsiThermo;
+    mixture         pureMixture;
+    transport       sutherland;
+    thermo          hConst;
+    equationOfState perfectGas;
+    specie          specie;
+    energy          sensibleInternalEnergy;
+}}
+
+mixture
+{{
+    specie
+    {{
+        molWeight       28.96;  // Air molecular weight [g/mol]
+    }}
+    thermodynamics
+    {{
+        Cp              1005;   // Specific heat capacity [J/(kg·K)]
+        Hf              0;      // Heat of formation [J/kg]
+    }}
+    transport
+    {{
+        As              1.458e-06;  // Sutherland coefficient [kg/(m·s·K^0.5)]
+        Ts              110.4;      // Sutherland temperature [K]
+    }}
+}}
+
+// ************************************************************************* //
+"""
+        
+        with open(os.path.join(self.case_directory, "constant", "thermophysicalProperties"), 'w') as f:
             f.write(content)
             
     def _write_initial_conditions(self):
@@ -536,6 +755,13 @@ RAS
         # Write turbulence fields if enabled
         if self.turbulence_model.enabled:
             self._write_turbulence_fields()
+        
+        # Write temperature field for compressible solvers
+        if _is_compressible_solver(self.solver_settings.solver_type):
+            self._write_temperature_field()
+            # Write alphat (turbulent thermal diffusivity) for compressible turbulent flows
+            if self.turbulence_model.enabled:
+                self._write_alphat_field()
             
     def _write_velocity_field(self):
         """Write 0/U file."""
@@ -606,6 +832,13 @@ boundaryField
     }}
 
 """
+            elif bc.boundary_type == BoundaryType.EMPTY:
+                content += f"""    {bc_name}
+    {{
+        type            empty;
+    }}
+
+"""
 
         content += """}
 
@@ -617,6 +850,16 @@ boundaryField
             
     def _write_pressure_field(self):
         """Write 0/p file."""
+        is_compressible = _is_compressible_solver(self.solver_settings.solver_type)
+        
+        # Pressure dimensions differ between compressible and incompressible solvers
+        # Compressible: [1 -1 -2 0 0 0 0] (Pa = kg/m·s²)
+        # Incompressible: [0 2 -2 0 0 0 0] (m²/s² = kinematic pressure p/rho)
+        if is_compressible:
+            p_dimensions = "[1 -1 -2 0 0 0 0]"
+        else:
+            p_dimensions = "[0 2 -2 0 0 0 0]"
+            
         content = f"""/*--------------------------------*- C++ -*----------------------------------*\\
 | =========                 |                                                 |
 | \\\\      /  F ield         | OpenFOAM: The Open Source CFD Toolbox           |
@@ -634,9 +877,9 @@ FoamFile
 }}
 // * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
 
-dimensions      [0 2 -2 0 0 0 0];
+dimensions      {p_dimensions};
 
-internalField   uniform 0;
+internalField   uniform {self.fluid_properties.pressure};
 
 boundaryField
 {{
@@ -673,6 +916,13 @@ boundaryField
     }}
 
 """
+            elif bc.boundary_type == BoundaryType.EMPTY:
+                content += f"""    {bc_name}
+    {{
+        type            empty;
+    }}
+
+"""
 
         content += """}
 
@@ -681,9 +931,99 @@ boundaryField
         
         with open(os.path.join(self.case_directory, "0", "p"), 'w') as f:
             f.write(content)
+    
+    def _write_temperature_field(self):
+        """Write 0/T file for compressible solvers."""
+        content = f"""/*--------------------------------*- C++ -*----------------------------------*\\
+| =========                 |                                                 |
+| \\\\      /  F ield         | OpenFOAM: The Open Source CFD Toolbox           |
+|  \\\\    /   O peration     | Version:  v2012                                 |
+|   \\\\  /    A nd           | Website:  www.openfoam.com                      |
+|    \\\\/     M anipulation  |                                                 |
+\\*---------------------------------------------------------------------------*/
+FoamFile
+{{
+    version     2.0;
+    format      ascii;
+    class       volScalarField;
+    location    "0";
+    object      T;
+}}
+// * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
+
+dimensions      [0 0 0 1 0 0 0];
+
+internalField   uniform {self.fluid_properties.temperature};
+
+boundaryField
+{{
+"""
+
+        # Add boundary conditions
+        for bc_name, bc in self.boundary_conditions.items():
+            if bc.boundary_type == BoundaryType.INLET:
+                content += f"""    {bc_name}
+    {{
+        type            fixedValue;
+        value           uniform {self.fluid_properties.temperature};
+    }}
+
+"""
+            elif bc.boundary_type == BoundaryType.OUTLET:
+                content += f"""    {bc_name}
+    {{
+        type            zeroGradient;
+    }}
+
+"""
+            elif bc.boundary_type == BoundaryType.WALL:
+                content += f"""    {bc_name}
+    {{
+        type            zeroGradient;
+    }}
+
+"""
+            elif bc.boundary_type == BoundaryType.SYMMETRY:
+                content += f"""    {bc_name}
+    {{
+        type            symmetryPlane;
+    }}
+
+"""
+            elif bc.boundary_type == BoundaryType.EMPTY:
+                content += f"""    {bc_name}
+    {{
+        type            empty;
+    }}
+
+"""
+
+        content += """}
+
+// ************************************************************************* //
+"""
+        
+        with open(os.path.join(self.case_directory, "0", "T"), 'w') as f:
+            f.write(content)
             
     def _write_turbulence_fields(self):
-        """Write turbulence field files (k, epsilon)."""
+        """Write turbulence field files based on selected model."""
+        if not self.turbulence_model.enabled:
+            return
+
+        if self.turbulence_model.model_type == "kOmegaSST":
+            self._write_turbulence_fields_komega()
+            return
+
+        if self.turbulence_model.model_type == "SpalartAllmaras":
+            self._write_turbulence_fields_spalart_allmaras()
+            return
+
+        # Default to k-epsilon
+        self._write_turbulence_fields_kepsilon()
+
+    def _write_turbulence_fields_kepsilon(self):
+        """Write turbulence field files (k, epsilon, nut) for k-epsilon."""
         # Estimate turbulence values from inlet conditions
         inlet_k = 0.01
         inlet_epsilon = 0.001
@@ -758,6 +1098,336 @@ boundaryField
             f.write(k_content)
             
         # Write epsilon field
+
+    def _write_turbulence_fields_komega(self):
+        """Write turbulence field files (k, omega, nut) for k-omega SST."""
+        import math
+
+        inlet_k = 0.01
+        inlet_omega = 1.0
+
+        for bc in self.boundary_conditions.values():
+            if bc.boundary_type == BoundaryType.INLET:
+                inlet_k = 1.5 * (bc.velocity_magnitude * bc.turbulence_intensity) ** 2
+                # A common estimate: omega = sqrt(k) / (Cmu^(1/4) * L)
+                cmu_quarter = float(0.09) ** 0.25
+                L = max(float(bc.turbulence_length_scale), 1e-9)
+                inlet_omega = max(math.sqrt(max(inlet_k, 1e-12)) / (cmu_quarter * L), 1e-9)
+                break
+
+        k_content = f"""/*--------------------------------*- C++ -*----------------------------------*\\
+| =========                 |                                                 |
+| \\\\      /  F ield         | OpenFOAM: The Open Source CFD Toolbox           |
+|  \\\\    /   O peration     | Version:  v2012                                 |
+|   \\\\  /    A nd           | Website:  www.openfoam.com                      |
+|    \\\\/     M anipulation  |                                                 |
+\\*---------------------------------------------------------------------------*/
+FoamFile
+{{
+    version     2.0;
+    format      ascii;
+    class       volScalarField;
+    location    "0";
+    object      k;
+}}
+// * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
+
+dimensions      [0 2 -2 0 0 0 0];
+
+internalField   uniform {inlet_k};
+
+boundaryField
+{{
+"""
+
+        for bc_name, bc in self.boundary_conditions.items():
+            if bc.boundary_type == BoundaryType.INLET:
+                k_val = 1.5 * (bc.velocity_magnitude * bc.turbulence_intensity) ** 2
+                k_content += f"""    {bc_name}
+    {{
+        type            fixedValue;
+        value           uniform {k_val};
+    }}
+
+"""
+            elif bc.boundary_type == BoundaryType.OUTLET:
+                k_content += f"""    {bc_name}
+    {{
+        type            zeroGradient;
+    }}
+
+"""
+            elif bc.boundary_type == BoundaryType.WALL:
+                k_content += f"""    {bc_name}
+    {{
+        type            kqRWallFunction;
+        value           uniform {inlet_k};
+    }}
+
+"""
+
+        k_content += """}
+
+// ************************************************************************* //
+"""
+
+        with open(os.path.join(self.case_directory, "0", "k"), 'w') as f:
+            f.write(k_content)
+
+        omega_content = f"""/*--------------------------------*- C++ -*----------------------------------*\\
+| =========                 |                                                 |
+| \\\\      /  F ield         | OpenFOAM: The Open Source CFD Toolbox           |
+|  \\\\    /   O peration     | Version:  v2012                                 |
+|   \\\\  /    A nd           | Website:  www.openfoam.com                      |
+|    \\\\/     M anipulation  |                                                 |
+\\*---------------------------------------------------------------------------*/
+FoamFile
+{{
+    version     2.0;
+    format      ascii;
+    class       volScalarField;
+    location    "0";
+    object      omega;
+}}
+// * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
+
+dimensions      [0 0 -1 0 0 0 0];
+
+internalField   uniform {inlet_omega};
+
+boundaryField
+{{
+"""
+
+        for bc_name, bc in self.boundary_conditions.items():
+            if bc.boundary_type == BoundaryType.INLET:
+                omega_content += f"""    {bc_name}
+    {{
+        type            fixedValue;
+        value           uniform {inlet_omega};
+    }}
+
+"""
+            elif bc.boundary_type == BoundaryType.OUTLET:
+                omega_content += f"""    {bc_name}
+    {{
+        type            zeroGradient;
+    }}
+
+"""
+            elif bc.boundary_type == BoundaryType.WALL:
+                omega_content += f"""    {bc_name}
+    {{
+        type            omegaWallFunction;
+        value           uniform {inlet_omega};
+    }}
+
+"""
+
+        omega_content += """}
+
+// ************************************************************************* //
+"""
+
+        with open(os.path.join(self.case_directory, "0", "omega"), 'w') as f:
+            f.write(omega_content)
+
+        self._write_nut_field_for_komega(inlet_k, inlet_omega)
+
+    def _write_nut_field_for_komega(self, inlet_k: float, inlet_omega: float):
+        inlet_nut = float(inlet_k) / max(float(inlet_omega), 1e-12)
+
+        nut_content = f"""/*--------------------------------*- C++ -*----------------------------------*\\
+| =========                 |                                                 |
+| \\\\      /  F ield         | OpenFOAM: The Open Source CFD Toolbox           |
+|  \\\\    /   O peration     | Version:  v2012                                 |
+|   \\\\  /    A nd           | Website:  www.openfoam.com                      |
+|    \\\\/     M anipulation  |                                                 |
+\\*---------------------------------------------------------------------------*/
+FoamFile
+{{
+    version     2.0;
+    format      ascii;
+    class       volScalarField;
+    location    "0";
+    object      nut;
+}}
+// * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
+
+dimensions      [0 2 -1 0 0 0 0];
+
+internalField   uniform {inlet_nut};
+
+boundaryField
+{{
+"""
+
+        for bc_name, bc in self.boundary_conditions.items():
+            if bc.boundary_type == BoundaryType.INLET:
+                nut_content += f"""    {bc_name}
+    {{
+        type            fixedValue;
+        value           uniform {inlet_nut};
+    }}
+
+"""
+            elif bc.boundary_type == BoundaryType.OUTLET:
+                nut_content += f"""    {bc_name}
+    {{
+        type            calculated;
+        value           uniform {inlet_nut};
+    }}
+
+"""
+            elif bc.boundary_type == BoundaryType.WALL:
+                nut_content += f"""    {bc_name}
+    {{
+        type            nutkWallFunction;
+        value           uniform {inlet_nut};
+    }}
+
+"""
+
+        nut_content += """}
+
+// ************************************************************************* //
+"""
+
+        with open(os.path.join(self.case_directory, "0", "nut"), 'w') as f:
+            f.write(nut_content)
+
+    def _write_alphat_field(self):
+        """Write 0/alphat file for compressible turbulent flows."""
+        # alphat is turbulent thermal diffusivity, typically initialized to 0
+        # and computed from nut and Prandtl number during simulation
+        alphat_content = f"""/*--------------------------------*- C++ -*----------------------------------*\\
+| =========                 |                                                 |
+| \\\\      /  F ield         | OpenFOAM: The Open Source CFD Toolbox           |
+|  \\\\    /   O peration     | Version:  v2012                                 |
+|   \\\\  /    A nd           | Website:  www.openfoam.com                      |
+|    \\\\/     M anipulation  |                                                 |
+\\*---------------------------------------------------------------------------*/
+FoamFile
+{{
+    version     2.0;
+    format      ascii;
+    class       volScalarField;
+    location    "0";
+    object      alphat;
+}}
+// * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
+
+dimensions      [1 -1 -1 0 0 0 0];
+
+internalField   uniform 0;
+
+boundaryField
+{{
+"""
+
+        for bc_name, bc in self.boundary_conditions.items():
+            if bc.boundary_type == BoundaryType.INLET:
+                alphat_content += f"""    {bc_name}
+    {{
+        type            calculated;
+        value           uniform 0;
+    }}
+
+"""
+            elif bc.boundary_type == BoundaryType.OUTLET:
+                alphat_content += f"""    {bc_name}
+    {{
+        type            calculated;
+        value           uniform 0;
+    }}
+
+"""
+            elif bc.boundary_type == BoundaryType.WALL:
+                alphat_content += f"""    {bc_name}
+    {{
+        type            compressible::alphatWallFunction;
+        Prt             0.85;
+        value           uniform 0;
+    }}
+
+"""
+            elif bc.boundary_type == BoundaryType.EMPTY:
+                alphat_content += f"""    {bc_name}
+    {{
+        type            empty;
+    }}
+
+"""
+
+        alphat_content += """}
+
+// ************************************************************************* //
+"""
+
+        with open(os.path.join(self.case_directory, "0", "alphat"), 'w') as f:
+            f.write(alphat_content)
+
+    def _write_turbulence_fields_spalart_allmaras(self):
+        """Write turbulence field files (nuTilda) for Spalart-Allmaras."""
+        inlet_nu = float(self.fluid_properties.viscosity) / max(float(self.fluid_properties.density), 1e-12)
+
+        nutilda_content = f"""/*--------------------------------*- C++ -*----------------------------------*\\
+| =========                 |                                                 |
+| \\\\      /  F ield         | OpenFOAM: The Open Source CFD Toolbox           |
+|  \\\\    /   O peration     | Version:  v2012                                 |
+|   \\\\  /    A nd           | Website:  www.openfoam.com                      |
+|    \\\\/     M anipulation  |                                                 |
+\\*---------------------------------------------------------------------------*/
+FoamFile
+{{
+    version     2.0;
+    format      ascii;
+    class       volScalarField;
+    location    "0";
+    object      nuTilda;
+}}
+// * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
+
+dimensions      [0 2 -1 0 0 0 0];
+
+internalField   uniform {inlet_nu};
+
+boundaryField
+{{
+"""
+
+        for bc_name, bc in self.boundary_conditions.items():
+            if bc.boundary_type == BoundaryType.INLET:
+                nutilda_content += f"""    {bc_name}
+    {{
+        type            fixedValue;
+        value           uniform {inlet_nu};
+    }}
+
+"""
+            elif bc.boundary_type == BoundaryType.OUTLET:
+                nutilda_content += f"""    {bc_name}
+    {{
+        type            zeroGradient;
+    }}
+
+"""
+            elif bc.boundary_type == BoundaryType.WALL:
+                nutilda_content += f"""    {bc_name}
+    {{
+        type            fixedValue;
+        value           uniform 0;
+    }}
+
+"""
+
+        nutilda_content += """}
+
+// ************************************************************************* //
+"""
+
+        with open(os.path.join(self.case_directory, "0", "nuTilda"), 'w') as f:
+            f.write(nutilda_content)
         epsilon_content = f"""/*--------------------------------*- C++ -*----------------------------------*\\
 | =========                 |                                                 |
 | \\\\      /  F ield         | OpenFOAM: The Open Source CFD Toolbox           |
