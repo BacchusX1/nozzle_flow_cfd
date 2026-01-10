@@ -71,24 +71,38 @@ class TemplateLoader:
         for element_data in template_data.get("elements", []):
             element_type = element_data["type"]
             control_points = element_data["control_points"]
+            boundary = element_data.get("boundary", "wall")  # Default to wall
             
             if element_type == "PolynomialElement":
-                element = PolynomialElement(control_points)
+                element = PolynomialElement(control_points, boundary=boundary)
             elif element_type == "LineElement":
-                element = LineElement(control_points[0], control_points[1])
+                # LineElement takes start and end points
+                if len(control_points) >= 2:
+                    element = LineElement(control_points[0], control_points[1], boundary=boundary)
+                else:
+                    continue
             elif element_type == "ArcElement":
-                element = ArcElement(points=control_points[:3])
+                element = ArcElement(points=control_points[:3], boundary=boundary)
             else:
                 continue  # Skip unknown element types
             
             geometry.add_element(element)
         
         # Set geometry properties if available
-        if "inlet_diameter" in template_data:
+        params = template_data.get("parameters", {})
+        if "inlet_diameter" in params:
+            geometry.inlet_diameter = params["inlet_diameter"]
+        elif "inlet_diameter" in template_data:
             geometry.inlet_diameter = template_data["inlet_diameter"]
-        if "outlet_diameter" in template_data:
+            
+        if "outlet_diameter" in params:
+            geometry.outlet_diameter = params["outlet_diameter"]
+        elif "outlet_diameter" in template_data:
             geometry.outlet_diameter = template_data["outlet_diameter"]
-        if "throat_diameter" in template_data:
+            
+        if "throat_diameter" in params:
+            geometry.throat_diameter = params["throat_diameter"]
+        elif "throat_diameter" in template_data:
             geometry.throat_diameter = template_data["throat_diameter"]
         
         return geometry, template_data

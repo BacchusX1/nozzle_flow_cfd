@@ -1,0 +1,280 @@
+# =============================================================================
+# Nozzle CFD Design Tool - Standard Values Configuration
+# =============================================================================
+# This file defines default values for all GUI input fields.
+# Modify these values to change the defaults when the application starts.
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# Geometry Settings (Step 1)
+# -----------------------------------------------------------------------------
+geometry:
+  # Interpolation points for smooth geometry visualization
+  interpolation_points: 100
+  
+  # Design constraints
+  min_throat_ratio: 0.5           # Minimum throat/inlet area ratio
+  max_divergence_angle: 20        # Maximum divergence half-angle (degrees)
+
+# -----------------------------------------------------------------------------
+# Mesh Settings (Step 2)
+# -----------------------------------------------------------------------------
+mesh:
+  # Mesh type: "hex" (hexahedral/structured) or "tet" (tetrahedral/unstructured)
+  mesh_type: tet                  # hex = structured quad/hex, tet = triangular/tet
+  
+  # Global mesh size controls
+  global_element_size: 0.05       # Base element size (meters)
+  min_element_size: 0.01         # Minimum cell size anywhere in mesh (meters)
+  max_element_size: 0.1          # Maximum cell size in far-field (meters)
+  
+  # Wall-specific sizing
+  wall_element_size: 0.01        # Element size at walls (meters)
+  
+  # Nozzle domain refinement
+  nozzle_refinement:
+    enabled: true                 # Enable refinement in nozzle region
+    cell_size: 0.05              # Cell size in nozzle domain (meters)
+    growth_rate: 1.15             # Growth rate from nozzle to ambient (1.1-1.3)
+  
+  # Boundary layer mesh (only applied to WALL boundaries, NOT inlet/outlet)
+  boundary_layer:
+    enabled: false
+    num_layers: 8                 # Number of prism layers (8-15 typical for RANS)
+    first_layer_thickness: 1.0e-5 # First cell height (meters) - for y+ ≈ 1
+    growth_ratio: 1.2             # Layer-to-layer growth rate (1.1-1.3)
+    # NOTE: Boundary layers are NOT applied to inlet/outlet boundaries
+    # because these are open flow boundaries where a BL would be unphysical.
+  
+  # Mesh quality
+  quality_threshold: 0.3          # Minimum acceptable element quality (0-1)
+  smoothing_iterations: 5         # Number of mesh smoothing passes
+  
+  # Domain extension
+  farfield_distance: 5.0          # Farfield distance (multiples of nozzle length)
+
+# -----------------------------------------------------------------------------
+# Flow Boundary Conditions (Step 3)
+# -----------------------------------------------------------------------------
+boundary_conditions:
+  # Inlet conditions (TOTAL/STAGNATION values for compressible flow)
+  inlet:
+    total_pressure: 1500000        # Pa (5 bar) - stagnation pressure
+    total_temperature: 300        # K - stagnation temperature
+    # Note: Velocity is NOT specified for compressible flow!
+    # The solver computes velocity from pressure ratio automatically.
+    velocity_magnitude: 100.0     # m/s (only used for incompressible solvers)
+  
+  # Outlet conditions
+  outlet:
+    static_pressure: 100000        # Pa (1.0 bar) - back pressure
+    # Pressure ratio = inlet_total / outlet_static = 10:1
+    # This produces fully expanded supersonic flow in a properly designed nozzle
+  
+  # Wall conditions
+  wall:
+    is_adiabatic: true            # Adiabatic (no heat transfer) by default
+    temperature: 300              # K (used if isothermal wall)
+    heat_flux: 0.0                # W/m² (used if constant heat flux)
+
+# -----------------------------------------------------------------------------
+# Fluid Properties
+# -----------------------------------------------------------------------------
+fluid:
+  # Air properties at standard conditions
+  gas_constant: 287.058           # J/(kg·K) - specific gas constant for air
+  gamma: 1.4                      # Ratio of specific heats (Cp/Cv)
+  specific_heat_cp: 1004.5        # J/(kg·K) - specific heat at constant pressure
+  prandtl_number: 0.72            # Laminar Prandtl number
+  prandtl_turb: 0.9               # Turbulent Prandtl number
+  
+  # Reference/freestream conditions (AUTO-CALCULATED from boundary conditions)
+  # These are computed automatically for physical initialization:
+  #   reference_pressure = outlet_static_pressure (domain starts at back pressure)
+  #   reference_temperature = inlet_total_temperature
+  #   reference_density = reference_pressure / (gas_constant * reference_temperature)
+  # The inlet pressure then drives the flow, and shocks form where physics requires.
+  # You can override by uncommenting:
+  # reference_pressure: 400000    # Pa - override auto-calculation
+  # reference_temperature: 300    # K - override auto-calculation
+  # reference_density: 4.0        # kg/m³ - override auto-calculation
+  viscosity: 1.81e-5              # Pa·s - dynamic viscosity
+
+# -----------------------------------------------------------------------------
+# Initialization Settings
+# -----------------------------------------------------------------------------
+# Controls how the flow domain is initialized before simulation starts.
+# A physically motivated initialization improves convergence and stability.
+#
+# IMPORTANT: For viscous solvers (NAVIER_STOKES, RANS), SU2 by default ignores
+# FREESTREAM_PRESSURE and computes initialization density from REYNOLDS_NUMBER.
+# We use INIT_OPTION=TD_CONDITIONS to force SU2 to use the thermodynamic 
+# conditions (pressure, temperature) specified here for initialization.
+initialization:
+  # Initialization method:
+  #   outlet_pressure  - Domain starts at back pressure (recommended for nozzle)
+  #   inlet_pressure   - Domain starts at inlet total pressure
+  #   average_pressure - Domain starts at (inlet + outlet) / 2
+  #   custom           - Use custom values specified below
+  method: custom
+  
+  # Initial velocity in domain (m/s) - small value to seed flow direction
+  velocity: 0.1
+  
+  # Initial temperature (K) - usually same as inlet total temperature
+  temperature: 300.0
+  
+  # Custom initialization values (used when method = custom)
+  custom_pressure: 100000.0       # Pa
+  custom_density: 1.225           # kg/m³
+
+# -----------------------------------------------------------------------------
+# Solver Settings (Step 3)
+# -----------------------------------------------------------------------------
+# OPTIMIZED FOR NAVIER-STOKES TRANSIENT STABILITY
+# Key factors for avoiding divergence:
+# 1. Lower CFL number (start conservative, increase once stable)
+# 2. Implicit time discretization with proper linear solver
+# 3. Adaptive CFL to recover from instabilities
+# 4. Appropriate time step for the flow physics
+solver:
+  # Solver type: EULER, NAVIER_STOKES, RANS
+  type: NAVIER_STOKES             # NAVIER_STOKES for viscous compressible flow
+  
+  # Simulation mode - STEADY is more stable to establish flow first
+  is_transient: true             # Start with steady for stability, switch to transient after
+  
+  # Flow conditions
+  mach_number: 0.5                # Initial/freestream Mach number (moderate for subsonic inlet)
+  reynolds_number: 5.0e5          # Reynolds number - lower for stability
+  reynolds_length: 0.1            # Reference length for Re calculation (meters) - nozzle length scale
+  
+  # Iteration settings (steady-state)
+  max_iterations: 5000            # More iterations for convergence
+  convergence_residual: -8        # Log10 of residual target (tighter for accuracy)
+  
+  # CFL number - CRITICAL FOR STABILITY
+  cfl_number: 1.0                 # Start very conservative for N-S
+  cfl_adapt: true                 # ENABLE adaptive CFL for robustness
+  cfl_min: 0.5                    # Minimum CFL (don't go too low)
+  cfl_max: 10.0                   # Maximum CFL (limit for stability)
+  cfl_adapt_factor_down: 0.5      # Reduce CFL by this factor on instability
+  cfl_adapt_factor_up: 1.05       # Increase CFL by this factor on stability
+  
+  # Numerical schemes - OPTIMIZED FOR STABILITY
+  convective_scheme: JST          # JST is more dissipative/stable than ROE for transient
+  muscl_reconstruction: false     # Disable MUSCL for initial stability
+  slope_limiter: VENKATAKRISHNAN  # Good limiter for smooth flows
+  time_discretization: EULER_IMPLICIT  # IMPLICIT is more stable than explicit
+  gradient_method: WEIGHTED_LEAST_SQUARES  # More robust gradient computation
+  
+  # Linear solver (for implicit schemes) - CRITICAL FOR IMPLICIT
+  linear_solver: FGMRES           # FGMRES is robust
+  linear_solver_preconditioner: ILU  # ILU is stable
+  linear_solver_iterations: 15    # More iterations for better convergence
+  linear_solver_error: 1.0e-8     # Tighter tolerance
+  
+  # Multigrid - helps convergence
+  multigrid_levels: 3
+  multigrid_cycle: W_CYCLE        # W_CYCLE is more robust than V_CYCLE
+
+# -----------------------------------------------------------------------------
+# Transient/Unsteady Settings
+# -----------------------------------------------------------------------------
+# OPTIMIZED FOR COMPRESSIBLE NAVIER-STOKES STABILITY
+# Time step should satisfy: dt < dx_min / (|u| + c) where c is speed of sound
+# For nozzle flow with ~Mach 2 outlet and c~340 m/s, and dx~0.001m:
+# dt < 0.001 / (680 + 340) ~ 1e-6 s (acoustic CFL)
+transient:
+  time_step: 5.0e-6               # Conservative time step for acoustic CFL < 1
+  end_time: 0.4                   # Total simulation time (100ms)
+  inner_iterations: 10            # More inner iterations for dual time-stepping
+  dual_time_stepping: true        # Use dual time stepping for unsteady
+  restart_frequency: 100          # Save restart files frequently
+  
+  # Variable Time Step (Multi-Phase Simulation)
+  # Runs simulation in phases with different time steps for efficiency:
+  # Phase 1: Small dt to establish stable flow (startup transient)
+  # Phase 2+: Larger dt for faster time advancement (developed flow)
+  variable_dt:
+    enabled: false                # Enable multi-phase variable time stepping
+    # Phase 1: Startup (small time step for stability)
+    phase1_dt: 1.0e-6             # Very small dt for initial transient
+    phase1_duration: 5.0e-5        # Run for 1ms with small dt
+    phase1_inner_iter: 50         # More inner iterations for stability
+    # Phase 2: Developed flow (larger time step for efficiency)  
+    phase2_dt: 1.0e-5             # 10x larger dt after flow established
+    phase2_duration: 5.0e-3         # Run for 10ms with medium dt
+    phase2_inner_iter: 30         # Standard inner iterations
+    # Phase 3: Final (even larger time step if flow is stable)
+    phase3_dt: 1.0e-4             # 50x larger than startup dt
+    phase3_inner_iter: 20         # Fewer inner iterations needed
+
+# -----------------------------------------------------------------------------
+# Turbulence Model Settings (for RANS)
+# -----------------------------------------------------------------------------
+turbulence:
+  enabled: true                  # Enable turbulence modeling
+  model: SST                      # SA (Spalart-Allmaras), SST (k-omega SST)
+  intensity: 0.05                 # Freestream turbulence intensity (5%)
+  viscosity_ratio: 10.0           # Turbulent/laminar viscosity ratio
+
+# -----------------------------------------------------------------------------
+# Parallel Processing
+# -----------------------------------------------------------------------------
+parallel:
+  num_processors: 6               # Number of MPI processes
+  decomposition_method: METIS     # Domain decomposition method
+
+# -----------------------------------------------------------------------------
+# Output Settings
+# -----------------------------------------------------------------------------
+output:
+  frequency: 1000                  # Write output every N iterations
+  formats:
+    - PARAVIEW                    # VTK format for ParaView
+    - SURFACE_PARAVIEW            # Surface VTK
+    - SURFACE_CSV                 # Surface data as CSV
+
+# -----------------------------------------------------------------------------
+# Postprocessing / Results Viewer Settings (Step 4)
+# -----------------------------------------------------------------------------
+postprocessing:
+  # Default visualization settings
+  default_field: "Velocity"       # Field to show on initial load
+  colormap: "jet"             # Default colormap (viridis, plasma, jet, coolwarm, RdYlBu)
+  contour_levels: 20              # Number of contour levels (5-100)
+  show_mesh_edges: false          # Show mesh wireframe overlay
+  
+  # Default case directories to show in dropdown
+  case_directories:
+    - "./case"
+    - "./case2"
+  
+  # Available fields for SU2 results
+  available_fields:
+    - "Pressure"
+    - "Velocity"
+    - "Temperature"
+    - "Mach"
+    - "Density"
+    - "Momentum"
+    - "Energy"
+
+# -----------------------------------------------------------------------------
+# Quick Reference: Pressure Ratio Guide for De Laval Nozzle
+# -----------------------------------------------------------------------------
+# The pressure ratio (P_inlet_total / P_outlet_static) determines the flow regime:
+#
+# Pressure Ratio | Flow Regime                    | Notes
+# --------------|--------------------------------|----------------------------------
+# < 1.89        | Subsonic throughout            | No choking at throat
+# 1.89          | Choked (M=1 at throat)         | Critical pressure ratio for air
+# 1.89 - design | Normal shock in divergent      | Shock location depends on ratio
+# design        | Fully expanded supersonic      | Isentropic, no shocks
+# > design      | Overexpanded                   | Shock diamonds outside nozzle
+#
+# For γ = 1.4 (air), critical pressure ratio = (1 + (γ-1)/2)^(γ/(γ-1)) ≈ 1.893
+#
+# Example: For Mach 2 exit, design pressure ratio ≈ 7.82
+#          For Mach 3 exit, design pressure ratio ≈ 36.7

@@ -1,0 +1,141 @@
+# =============================================================================
+# Nozzle CFD Design Tool - Configuration File
+# =============================================================================
+# This file controls the visual appearance and layout of the application.
+# All color values should be in hex format (#RRGGBB or #AARRGGBB for alpha)
+# Sizes are in pixels (will be scaled for 4K displays automatically)
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# Theme Colors
+# -----------------------------------------------------------------------------
+theme:
+  # Core background colors
+  background: "#0d1117"           # Main application background
+  surface: "#161b22"              # Elevated panels and cards
+  surface_variant: "#21262d"      # Secondary containers
+  surface_elevated: "#30363d"     # Highest elevation elements
+  
+  # Primary accent color (used for buttons, links, highlights)
+  primary: "#58a6ff"              # Main accent color (blue)
+  primary_variant: "#388bfd"      # Darker variant for pressed states
+  primary_light: "#79c0ff"        # Lighter variant for hover states
+  
+  # Secondary accent color (used for warnings, accents)
+  accent: "#f78166"               # Secondary accent (coral/orange)
+  accent_variant: "#e36749"       # Darker accent variant
+  accent_light: "#ffa28b"         # Lighter accent variant
+  
+  # Status colors
+  success: "#3fb950"              # Success states and confirmations
+  warning: "#d29922"              # Warning states
+  error: "#f85149"                # Error states
+  info: "#58a6ff"                 # Informational states
+  
+  # Text colors
+  text_primary: "#f0f6fc"         # Primary text (headings, important)
+  text_secondary: "#8b949e"       # Secondary text (descriptions)
+  text_tertiary: "#6e7681"        # Tertiary text (hints, less important)
+  
+  # Border colors
+  border: "#30363d"               # Standard borders
+  border_subtle: "#21262d"        # Subtle borders
+  border_accent: "#58a6ff"        # Accent/focus borders
+  
+  # Input field colors
+  input_background: "#0d1117"     # Input field background
+  input_border: "#30363d"         # Input field border
+  input_border_focus: "#58a6ff"   # Input field border when focused
+  
+  # Canvas/graphics colors
+  canvas_background: "#0d1117"    # Drawing canvas background
+  grid_major: "#30363d"           # Major grid lines
+  grid_minor: "#21262d"           # Minor grid lines
+  geometry_line: "#58a6ff"        # Geometry element lines
+  geometry_point: "#f78166"       # Geometry points
+  geometry_selected: "#3fb950"    # Selected geometry elements
+  mesh_line: "#6e7681"            # Mesh element lines
+  mesh_boundary: "#d29922"        # Boundary mesh elements
+
+# -----------------------------------------------------------------------------
+# Typography (Font Sizes)
+# -----------------------------------------------------------------------------
+# Note: These are base sizes in pixels. They will be automatically scaled
+# based on your display DPI for optimal readability on 4K monitors.
+typography:
+  font_size_tiny: 13
+  font_size_small: 13
+  font_size_normal: 13            # Base font size for most text
+  font_size_medium: 14
+  font_size_large: 18             # Section headers
+  font_size_xlarge: 18
+  font_size_title: 18             # Main titles
+  font_size_hero: 18              # Hero/splash text
+  
+  # Font weights (100-900, with 400 being normal)
+  font_weight_light: 300
+  font_weight_normal: 300
+  font_weight_medium: 300
+  font_weight_semibold: 300
+  font_weight_bold: 400
+
+# -----------------------------------------------------------------------------
+# Button Styling
+# -----------------------------------------------------------------------------
+buttons:
+  # Button dimensions (pixels, will be scaled for 4K)
+  min_height: 40                  # Minimum button height
+  min_width: 100                  # Minimum button width
+  padding_horizontal: 24          # Horizontal padding inside buttons
+  padding_vertical: 10            # Vertical padding inside buttons
+  
+  # Border styling
+  border_width: 2                 # Button border width
+  border_radius: 8                # Corner radius (0 = square)
+  
+  # Style type: "outlined" or "filled"
+  # outlined = transparent background with colored border
+  # filled = solid background color
+  default_style: "outlined"
+
+# -----------------------------------------------------------------------------
+# Layout & Spacing
+# -----------------------------------------------------------------------------
+layout:
+  # Spacing scale (pixels, will be scaled for 4K)
+  spacing_xs: 8
+  spacing_sm: 14
+  spacing_md: 24
+  spacing_lg: 36
+  spacing_xl: 48
+  spacing_xxl: 72
+  
+  # Border radius scale
+  radius_sm: 10
+  radius_md: 14
+  radius_lg: 20
+  radius_xl: 28
+  
+  # Panel widths
+  input_panel_min_width: 520      # Minimum width for input/control panels
+  bottom_panel_min_height: 150    # Minimum height for bottom input panels
+  
+  # Splitter proportions (relative sizes)
+  splitter_panel_ratio: 35        # Input panel percentage (0-100)
+  splitter_canvas_ratio: 65       # Canvas/viewer percentage (0-100)
+  splitter_bottom_ratio: 20       # Bottom panel percentage (0-100)
+
+# -----------------------------------------------------------------------------
+# Display Scaling
+# -----------------------------------------------------------------------------
+display:
+  # Auto-scale for 4K displays (true/false)
+  auto_scale: true
+  
+  # Manual scale factor override (1.0 = 100%, 1.5 = 150%, 2.0 = 200%)
+  # Set to null or remove to use auto-scaling
+  scale_factor: null
+  
+  # Minimum and maximum scale factors
+  min_scale: 1.0
+  max_scale: 2.5

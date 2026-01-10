@@ -1,5 +1,5 @@
 """
-Interactive Post-Processor Widget for OpenFOAM CFD Results
+Interactive Post-Processor Widget for SU2 CFD Results
 
 Provides interactive visualization with:
 - Plot selection from available fields
@@ -16,7 +16,7 @@ from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGroupBox, QLabel,
     QPushButton, QComboBox, QSpinBox, QDoubleSpinBox,
     QFileDialog, QMessageBox, QSplitter, QTextEdit,
-    QCheckBox, QFormLayout, QFrame
+    QCheckBox, QFormLayout, QFrame, QScrollArea
 )
 from PySide6.QtCore import Qt, Signal
 
@@ -28,13 +28,33 @@ import matplotlib.tri as mtri
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.figure import Figure
 
-# Import case analyzer functions
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__)))))
+# Import SU2 case analyzer
+sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 try:
-    from case_analyzer import OpenFOAMCase, read_foam_file, parse_field_data
+    from su2_case_analyzer import SU2Case, parse_history_csv
 except ImportError:
-    # Fallback - define minimal versions
-    OpenFOAMCase = None
+    try:
+        from src.core.su2_case_analyzer import SU2Case, parse_history_csv
+    except ImportError:
+        # Fallback - define minimal versions
+        SU2Case = None
+
+# Import standard values for defaults
+try:
+    from standard_values import DEFAULTS
+except ImportError:
+    try:
+        from core.standard_values import DEFAULTS
+    except ImportError:
+        # Fallback defaults if module not found
+        class _FallbackDefaults:
+            postproc_default_field = "Pressure"
+            postproc_colormap = "viridis"
+            postproc_contour_levels = 20
+            postproc_show_mesh_edges = False
+            postproc_case_directories = ["./case", "./case2"]
+            postproc_available_fields = ["Pressure", "Velocity", "Temperature", "Mach", "Density"]
+        DEFAULTS = _FallbackDefaults()
 
 
 class InteractiveCanvas(FigureCanvas):
@@ -211,19 +231,21 @@ class InteractiveCanvas(FigureCanvas):
 
 class InteractivePostprocessorWidget(QWidget):
     """
-    Interactive post-processor widget for OpenFOAM CFD results.
+    Interactive post-processor widget for SU2 CFD results.
     
     Features:
-    - Load and visualize OpenFOAM case results
-    - Select from available fields and time steps
+    - Load and visualize SU2 case results
+    - Select from available fields
     - Interactive value inspection on click
     - Zoom with middle mouse scroll
     - Pan with left mouse drag
     """
     
-    def __init__(self, parent=None, theme=None):
+    def __init__(self, parent=None, theme=None, scale_factor=1.0, configure_splitter_func=None):
         super().__init__(parent)
         self.theme = theme
+        self.scale_factor = scale_factor
+        self._configure_splitter = configure_splitter_func
         
         # Case data
         self.case = None
@@ -234,43 +256,127 @@ class InteractivePostprocessorWidget(QWidget):
         self._setup_ui()
         
     def _setup_ui(self):
-        """Setup the widget UI."""
-        layout = QHBoxLayout(self)
-        layout.setContentsMargins(8, 8, 8, 8)
-        layout.setSpacing(8)
+        """Setup the widget UI with canvas in center, controls on left, summary on right.
         
-        # Left panel - controls
+        Uses the same splitter layout pattern as the Geometry and Simulation tabs
+        for consistent look and feel across the application.
+        """
+        layout = QVBoxLayout(self)
+        layout.setSpacing(0)
+        layout.setContentsMargins(0, 0, 0, 0)
+        
+        scale = float(self.scale_factor or 1.0)
+        
+        # === MAIN HORIZONTAL SPLITTER: Controls | Canvas + Summary ===
+        top_splitter = QSplitter(Qt.Horizontal)
+        if self._configure_splitter:
+            self._configure_splitter(top_splitter)
+        else:
+            top_splitter.setChildrenCollapsible(False)
+            top_splitter.setHandleWidth(max(8, int(round(10 * scale))))
+        
+        # === LEFT PANEL: Controls (scrollable, like other tabs) ===
+        control_panel = QWidget()
+        control_panel.setMinimumWidth(int(round(520 * scale)))  # Match other tabs
+        control_panel.setStyleSheet("""
+            QWidget {
+                background: #252526;
+                border-right: 1px solid #3c3c3c;
+            }
+        """)
+        
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        scroll.setStyleSheet("""
+            QScrollArea {
+                border: none;
+                background: transparent;
+            }
+            QScrollArea > QWidget > QWidget {
+                background: transparent;
+            }
+        """)
+        
         controls_widget = self._create_controls_panel()
-        controls_widget.setMaximumWidth(350)
-        controls_widget.setMinimumWidth(280)
+        scroll.setWidget(controls_widget)
         
-        # Right panel - interactive canvas
-        canvas_widget = self._create_canvas_panel()
+        panel_layout = QVBoxLayout(control_panel)
+        panel_layout.setContentsMargins(0, 0, 0, 0)
+        panel_layout.addWidget(scroll)
         
-        # Add to splitter for resizable panels
-        splitter = QSplitter(Qt.Horizontal)
-        splitter.addWidget(controls_widget)
-        splitter.addWidget(canvas_widget)
-        splitter.setSizes([320, 800])
+        # === RIGHT SIDE: Canvas with Summary below ===
+        right_container = QWidget()
+        right_layout = QHBoxLayout(right_container)
+        right_layout.setContentsMargins(0, 0, 0, 0)
+        right_layout.setSpacing(0)
         
-        layout.addWidget(splitter)
+        # Canvas (center)
+        center_widget = self._create_canvas_panel()
+        
+        # Summary panel (right side of canvas)
+        summary_widget = self._create_summary_panel()
+        summary_widget.setMinimumWidth(int(round(280 * scale)))
+        summary_widget.setMaximumWidth(int(round(400 * scale)))
+        
+        # Sub-splitter for canvas + summary
+        canvas_summary_splitter = QSplitter(Qt.Horizontal)
+        if self._configure_splitter:
+            self._configure_splitter(canvas_summary_splitter)
+        else:
+            canvas_summary_splitter.setChildrenCollapsible(False)
+            canvas_summary_splitter.setHandleWidth(max(8, int(round(10 * scale))))
+        
+        canvas_summary_splitter.addWidget(center_widget)
+        canvas_summary_splitter.addWidget(summary_widget)
+        canvas_summary_splitter.setStretchFactor(0, 1)  # Canvas stretches
+        canvas_summary_splitter.setStretchFactor(1, 0)  # Summary fixed
+        canvas_summary_splitter.setSizes([int(round(700 * scale)), int(round(300 * scale))])
+        
+        right_layout.addWidget(canvas_summary_splitter)
+        
+        # Add panels to main splitter
+        top_splitter.addWidget(control_panel)
+        top_splitter.addWidget(right_container)
+        top_splitter.setStretchFactor(0, 3)  # Controls panel proportion
+        top_splitter.setStretchFactor(1, 2)  # Canvas area proportion
+        top_splitter.setSizes([int(round(760 * scale)), int(round(520 * scale))])
+
+        layout.addWidget(top_splitter, 1)
         
     def _create_controls_panel(self):
-        """Create the controls panel."""
+        """Create the controls panel (left side) with styling matching other tabs."""
         widget = QWidget()
         layout = QVBoxLayout(widget)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(8)
+        layout.setContentsMargins(20, 20, 20, 20)
+        layout.setSpacing(16)
+        
+        # Panel header (matching other tabs)
+        panel_header = QLabel("Results Viewer")
+        panel_header.setStyleSheet("""
+            QLabel {
+                color: #e0e0e0;
+                font-size: 17px;
+                font-weight: 700;
+                padding-bottom: 10px;
+                border-bottom: 3px solid #0078d4;
+            }
+        """)
+        layout.addWidget(panel_header)
         
         # === Case Loading ===
         load_group = QGroupBox("Load Case")
         load_layout = QVBoxLayout(load_group)
+        load_layout.setSpacing(8)
+        load_layout.setContentsMargins(12, 20, 12, 12)
         
-        # Case path
+        # Case path - use defaults from YAML
         path_layout = QHBoxLayout()
         self.case_path_edit = QComboBox()
         self.case_path_edit.setEditable(True)
-        self.case_path_edit.addItems(["./case", "./case2"])
+        case_dirs = getattr(DEFAULTS, 'postproc_case_directories', ['./case', './case2'])
+        self.case_path_edit.addItems(case_dirs)
+        self.case_path_edit.setToolTip("Path to SU2 case directory with results")
         
         btn_browse = QPushButton("...")
         btn_browse.setMaximumWidth(40)
@@ -280,8 +386,9 @@ class InteractivePostprocessorWidget(QWidget):
         path_layout.addWidget(btn_browse)
         load_layout.addLayout(path_layout)
         
-        btn_load = QPushButton("📂 Load Case")
+        btn_load = QPushButton("Load Case")
         btn_load.clicked.connect(self._load_case)
+        btn_load.setMinimumHeight(36)
         load_layout.addWidget(btn_load)
         
         layout.addWidget(load_group)
@@ -289,14 +396,24 @@ class InteractivePostprocessorWidget(QWidget):
         # === Field Selection ===
         field_group = QGroupBox("Field Selection")
         field_layout = QFormLayout(field_group)
+        field_layout.setSpacing(10)
+        field_layout.setContentsMargins(12, 20, 12, 12)
+        
+        # Use available fields from DEFAULTS
+        available_fields = getattr(DEFAULTS, 'postproc_available_fields', 
+                                   ["Pressure", "Velocity", "Temperature", "Mach", "Density"])
+        default_field = getattr(DEFAULTS, 'postproc_default_field', 'Pressure')
         
         self.field_combo = QComboBox()
-        self.field_combo.addItems(["U", "p", "T", "k", "omega", "nut", "epsilon"])
+        self.field_combo.addItems(available_fields)
+        self.field_combo.setCurrentText(default_field)
         self.field_combo.currentTextChanged.connect(self._on_field_changed)
+        self.field_combo.setToolTip("Select field variable to visualize")
         
         self.time_combo = QComboBox()
         self.time_combo.addItem("0")
         self.time_combo.currentTextChanged.connect(self._on_time_changed)
+        self.time_combo.setToolTip("Select time step / iteration")
         
         field_layout.addRow("Field:", self.field_combo)
         field_layout.addRow("Time:", self.time_combo)
@@ -306,21 +423,31 @@ class InteractivePostprocessorWidget(QWidget):
         # === Visualization Settings ===
         viz_group = QGroupBox("Visualization")
         viz_layout = QFormLayout(viz_group)
+        viz_layout.setSpacing(10)
+        viz_layout.setContentsMargins(12, 20, 12, 12)
         
+        # Use colormap from DEFAULTS
+        default_colormap = getattr(DEFAULTS, 'postproc_colormap', 'viridis')
         self.colormap_combo = QComboBox()
         self.colormap_combo.addItems([
             "viridis", "plasma", "inferno", "magma",
             "jet", "coolwarm", "RdYlBu", "seismic"
         ])
+        self.colormap_combo.setCurrentText(default_colormap)
         self.colormap_combo.currentTextChanged.connect(self._update_plot)
         
+        # Use contour levels from DEFAULTS
+        default_levels = getattr(DEFAULTS, 'postproc_contour_levels', 20)
         self.levels_spin = QSpinBox()
         self.levels_spin.setRange(5, 100)
+        self.levels_spin.setValue(default_levels)
         self.levels_spin.setValue(20)
         self.levels_spin.valueChanged.connect(self._update_plot)
         
         self.show_mesh_check = QCheckBox("Show mesh edges")
-        self.show_mesh_check.setChecked(False)
+        # Use show mesh edges from DEFAULTS
+        default_show_mesh = getattr(DEFAULTS, 'postproc_show_mesh_edges', False)
+        self.show_mesh_check.setChecked(default_show_mesh)
         self.show_mesh_check.stateChanged.connect(self._update_plot)
         
         viz_layout.addRow("Colormap:", self.colormap_combo)
@@ -329,9 +456,9 @@ class InteractivePostprocessorWidget(QWidget):
         
         # Buttons
         btn_layout = QHBoxLayout()
-        btn_reset = QPushButton("🔄 Reset View")
+        btn_reset = QPushButton("Reset View")
         btn_reset.clicked.connect(self._reset_view)
-        btn_save = QPushButton("💾 Save Image")
+        btn_save = QPushButton("Save Image")
         btn_save.clicked.connect(self._save_image)
         btn_layout.addWidget(btn_reset)
         btn_layout.addWidget(btn_save)
@@ -361,39 +488,65 @@ class InteractivePostprocessorWidget(QWidget):
         
         layout.addWidget(inspector_group)
         
+        layout.addStretch()
+        
+        return widget
+    
+    def _create_summary_panel(self):
+        """Create the case summary panel (right side)."""
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(8)
+        
         # === Case Summary ===
         summary_group = QGroupBox("Case Summary")
         summary_layout = QVBoxLayout(summary_group)
         
         self.summary_text = QTextEdit()
         self.summary_text.setReadOnly(True)
-        self.summary_text.setMaximumHeight(150)
         self.summary_text.setText("Load a case to see summary...")
+        self.summary_text.setStyleSheet("""
+            QTextEdit {
+                background: #2d2d2d;
+                border: none;
+                border-radius: 4px;
+                font-family: monospace;
+                font-size: 11px;
+                padding: 8px;
+            }
+        """)
         summary_layout.addWidget(self.summary_text)
         
         layout.addWidget(summary_group)
-        
-        # === Instructions ===
-        help_group = QGroupBox("Controls")
-        help_layout = QVBoxLayout(help_group)
-        help_label = QLabel(
-            "🖱️ <b>Left click</b>: Inspect value\n"
-            "🖱️ <b>Left drag</b>: Pan view\n"
-            "🖱️ <b>Scroll</b>: Zoom in/out"
-        )
-        help_label.setWordWrap(True)
-        help_layout.addWidget(help_label)
-        layout.addWidget(help_group)
-        
         layout.addStretch()
         
         return widget
         
     def _create_canvas_panel(self):
-        """Create the canvas panel with interactive plot."""
+        """Create the canvas panel with interactive plot and instructions overlay."""
         widget = QWidget()
         layout = QVBoxLayout(widget)
         layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+        
+        # Instructions text at top of canvas
+        instructions = QLabel(
+            "🖱️ <b>Left click</b>: Inspect value  |  "
+            "🖱️ <b>Left drag</b>: Pan view  |  "
+            "🖱️ <b>Scroll</b>: Zoom in/out"
+        )
+        instructions.setStyleSheet("""
+            QLabel {
+                background: #252525;
+                color: #a0a0a0;
+                padding: 6px 12px;
+                font-size: 11px;
+                border-bottom: 1px solid #404040;
+            }
+        """)
+        instructions.setAlignment(Qt.AlignCenter)
+        layout.addWidget(instructions)
         
         # Create interactive canvas
         self.canvas = InteractiveCanvas(self, width=10, height=6, dpi=100)
@@ -404,29 +557,29 @@ class InteractivePostprocessorWidget(QWidget):
             0.5, 0.5,
             'Load a case to visualize results\n\n'
             'Use the controls on the left to:\n'
-            '• Load an OpenFOAM case\n'
-            '• Select field and time step\n'
+            '• Load an SU2 case directory\n'
+            '• Select field to visualize\n'
             '• Customize visualization',
             transform=self.canvas.ax.transAxes,
             ha='center', va='center',
             color='#808080', fontsize=12
         )
         
-        layout.addWidget(self.canvas)
+        layout.addWidget(self.canvas, 1)
         
         return widget
         
     def _browse_case(self):
         """Browse for case directory."""
         directory = QFileDialog.getExistingDirectory(
-            self, "Select OpenFOAM Case Directory",
+            self, "Select SU2 Case Directory",
             os.path.expanduser("~")
         )
         if directory:
             self.case_path_edit.setCurrentText(directory)
             
     def _load_case(self):
-        """Load OpenFOAM case."""
+        """Load SU2 case."""
         case_dir = self.case_path_edit.currentText().strip()
         
         if not case_dir:
@@ -443,62 +596,81 @@ class InteractivePostprocessorWidget(QWidget):
             QMessageBox.warning(self, "Load Case", f"Directory not found: {case_dir}")
             return
             
-        # Check for OpenFOAM structure
-        constant_dir = os.path.join(case_dir, 'constant')
-        system_dir = os.path.join(case_dir, 'system')
+        # Check for SU2 case files (.cfg or .su2 mesh) OR VTU files directly
+        import glob
+        import re
+        cfg_files = glob.glob(os.path.join(case_dir, "*.cfg"))
+        mesh_files = glob.glob(os.path.join(case_dir, "*.su2"))
+        vtu_files = glob.glob(os.path.join(case_dir, "flow_*.vtu"))
         
-        if not os.path.exists(constant_dir) or not os.path.exists(system_dir):
+        if not cfg_files and not mesh_files and not vtu_files:
             QMessageBox.warning(
                 self, "Load Case",
-                "This doesn't look like an OpenFOAM case.\n"
-                "Expected 'constant/' and 'system/' directories."
+                "This doesn't look like an SU2 case.\n"
+                "Expected .cfg config file, .su2 mesh file, or flow_*.vtu results."
             )
             return
             
         try:
-            # Load case using case_analyzer
-            if OpenFOAMCase is not None:
-                self.case = OpenFOAMCase(case_dir)
+            # Load case using SU2 case analyzer
+            if SU2Case is not None:
+                self.case = SU2Case(case_dir)
                 self.case.load_mesh()
-                self.case.prepare_2d_surface()
+                self.case.load_solution()
             else:
-                QMessageBox.warning(self, "Load Case", "Case analyzer module not available.")
+                QMessageBox.warning(self, "Load Case", "SU2 case analyzer module not available.")
                 return
                 
             self.case_dir = case_dir
             
-            # Get available time directories
-            time_dirs = self.case.get_time_dirs()
-            
-            # Update time combo
+            # Scan for available timesteps from flow_*.vtu files
             self.time_combo.clear()
-            for t_val, t_dir in time_dirs:
-                self.time_combo.addItem(t_dir)
+            self.available_timesteps = {}  # Store mapping: display name -> file path
             
-            # Select latest time
-            if time_dirs:
-                self.time_combo.setCurrentText(time_dirs[-1][1])
-                
-            # Get available fields from latest time
-            if time_dirs:
-                latest_dir = os.path.join(case_dir, time_dirs[-1][1])
-                fields = []
-                for f in os.listdir(latest_dir):
-                    f_path = os.path.join(latest_dir, f)
-                    if os.path.isfile(f_path) and not f.startswith('.'):
-                        fields.append(f)
-                        
-                self.field_combo.clear()
-                self.field_combo.addItems(sorted(fields))
+            # Find all flow_*.vtu files and extract timestep numbers
+            vtu_pattern = re.compile(r'flow_(\d+)\.vtu$')
+            timesteps = []
+            for vtu_file in vtu_files:
+                filename = os.path.basename(vtu_file)
+                match = vtu_pattern.match(filename)
+                if match:
+                    step_num = int(match.group(1))
+                    timesteps.append((step_num, vtu_file))
+            
+            # Sort by timestep number
+            timesteps.sort(key=lambda x: x[0])
+            
+            # Populate time combo
+            if timesteps:
+                for step_num, file_path in timesteps:
+                    display_name = f"Step {step_num:05d}"
+                    self.time_combo.addItem(display_name)
+                    self.available_timesteps[display_name] = file_path
+                # Select the latest timestep by default
+                self.time_combo.setCurrentIndex(self.time_combo.count() - 1)
+            else:
+                # Fallback if no timesteps found
+                self.time_combo.addItem("latest")
+                self.available_timesteps["latest"] = None
+            
+            # Get available fields from solution data
+            available_fields = self.case.get_available_fields()
+            self.field_combo.clear()
+            if available_fields:
+                self.field_combo.addItems(available_fields)
+            else:
+                # Default SU2 fields
+                self.field_combo.addItems(["Pressure", "Velocity", "Temperature", "Mach", "Density"])
                 
             # Update summary
+            mesh_info = self.case.get_mesh_info()
             summary = f"""Case: {os.path.basename(case_dir)}
 Path: {case_dir}
 Mesh:
-  • Points: {len(self.case.points):,}
-  • Faces: {len(self.case.faces):,}
-  • Cells: {self.case.n_cells:,}
-Time steps: {len(time_dirs)}
+  • Points: {mesh_info.get('num_points', 'N/A'):,}
+  • Elements: {mesh_info.get('num_elements', 'N/A'):,}
+  • Dimension: {mesh_info.get('dimension', 'N/A')}D
+Solver: {self.case.get_solver_type() or 'N/A'}
 """
             self.summary_text.setText(summary)
             
@@ -507,7 +679,7 @@ Time steps: {len(time_dirs)}
             
             QMessageBox.information(
                 self, "Case Loaded",
-                f"Successfully loaded case with {self.case.n_cells:,} cells"
+                f"Successfully loaded SU2 case"
             )
             
         except Exception as e:
@@ -520,7 +692,18 @@ Time steps: {len(time_dirs)}
         self._update_plot()
         
     def _on_time_changed(self, time_dir):
-        """Handle time step change."""
+        """Handle time step change - reload the VTU file for selected timestep."""
+        if self.case is None:
+            return
+            
+        # Get the selected timestep file path
+        selected_time = self.time_combo.currentText()
+        if hasattr(self, 'available_timesteps') and selected_time in self.available_timesteps:
+            vtu_path = self.available_timesteps[selected_time]
+            if vtu_path:
+                # Reload the solution for this specific timestep
+                self.case.load_solution(vtu_path)
+        
         self._update_plot()
         
     def _update_plot(self):
@@ -529,14 +712,20 @@ Time steps: {len(time_dirs)}
             return
             
         field_name = self.field_combo.currentText()
-        time_dir = self.time_combo.currentText()
         
-        if not field_name or not time_dir:
+        if not field_name:
             return
             
         try:
-            # Load field data
-            field_data = self.case.load_field(time_dir, field_name)
+            # Get the selected timestep file path and load it if not already loaded
+            selected_time = self.time_combo.currentText()
+            if hasattr(self, 'available_timesteps') and selected_time in self.available_timesteps:
+                vtu_path = self.available_timesteps[selected_time]
+                if vtu_path:
+                    self.case.load_solution(vtu_path)
+            
+            # Load field data from SU2 case
+            field_data = self.case.get_field_data(field_name)
             
             if field_data is None:
                 self.canvas.ax.clear()
@@ -551,31 +740,27 @@ Time steps: {len(time_dirs)}
                 self.canvas.draw()
                 return
                 
-            # Interpolate to nodes
-            node_values = self.case.interpolate_to_nodes(field_data)
+            # Get node coordinates
+            points_2d = self.case.get_points_2d()
+            node_values = field_data
             
             # Handle vector fields - compute magnitude
-            is_vector = len(node_values.shape) > 1 and node_values.shape[1] == 3
+            is_vector = len(node_values.shape) > 1 and node_values.shape[1] >= 2
             if is_vector:
                 plot_values = np.linalg.norm(node_values, axis=1)
                 field_label = f"|{field_name}|"
             else:
-                plot_values = node_values
+                plot_values = node_values.flatten()
                 field_label = field_name
                 
-            # Get the subset of values for the triangulation
-            if hasattr(self.case, 'surface_point_ids') and self.case.surface_point_ids is not None:
-                plot_values_subset = plot_values[self.case.surface_point_ids]
-            elif hasattr(self.case, 'unique_indices') and self.case.unique_indices is not None:
-                plot_values_subset = plot_values[self.case.unique_indices]
-            else:
-                plot_values_subset = plot_values
-                
+            # Create triangulation if available
+            triangulation = self.case.get_triangulation()
+            
             # Store for value lookup
             self.canvas.set_field_data(
-                self.case.points_2d,
-                plot_values_subset,
-                self.case.triangulation,
+                points_2d,
+                plot_values,
+                triangulation,
                 field_name
             )
             
@@ -588,12 +773,22 @@ Time steps: {len(time_dirs)}
             levels = self.levels_spin.value()
             
             # Create contour plot
-            tripcolor = self.canvas.ax.tripcolor(
-                self.case.triangulation,
-                plot_values_subset,
-                shading='gouraud',
-                cmap=cmap
-            )
+            if triangulation is not None:
+                tripcolor = self.canvas.ax.tripcolor(
+                    triangulation,
+                    plot_values,
+                    shading='gouraud',
+                    cmap=cmap
+                )
+                
+                # Draw boundary outline for clear nozzle shape
+                self._draw_boundary(triangulation)
+            else:
+                # Fall back to scatter plot
+                tripcolor = self.canvas.ax.scatter(
+                    points_2d[:, 0], points_2d[:, 1],
+                    c=plot_values, cmap=cmap, s=5
+                )
             
             # Add colorbar
             cbar = self.canvas.fig.colorbar(tripcolor, ax=self.canvas.ax, label=field_label)
@@ -603,17 +798,17 @@ Time steps: {len(time_dirs)}
                 label.set_color('#e0e0e0')
                 
             # Show mesh edges if requested
-            if self.show_mesh_check.isChecked():
+            if self.show_mesh_check.isChecked() and triangulation is not None:
                 self.canvas.ax.triplot(
-                    self.case.triangulation,
+                    triangulation,
                     'k-', linewidth=0.1, alpha=0.3
                 )
                 
             # Add statistics text
             stats_text = (
-                f"Min: {plot_values_subset.min():.3e}\n"
-                f"Max: {plot_values_subset.max():.3e}\n"
-                f"Mean: {plot_values_subset.mean():.3e}"
+                f"Min: {plot_values.min():.3e}\n"
+                f"Max: {plot_values.max():.3e}\n"
+                f"Mean: {plot_values.mean():.3e}"
             )
             self.canvas.ax.text(
                 0.02, 0.98, stats_text,
@@ -624,7 +819,7 @@ Time steps: {len(time_dirs)}
             )
             
             # Style and labels
-            self.canvas.ax.set_title(f'{field_label} at t = {time_dir}', color='#e0e0e0', fontsize=12)
+            self.canvas.ax.set_title(f'{field_label}', color='#e0e0e0', fontsize=12)
             self.canvas._style_axes()
             self.canvas.ax.set_aspect('equal')
             
@@ -644,6 +839,30 @@ Time steps: {len(time_dirs)}
             )
             self.canvas._style_axes()
             self.canvas.draw()
+    
+    def _draw_boundary(self, triangulation):
+        """Draw mesh boundary outline for clear nozzle shape visualization."""
+        from collections import Counter
+        
+        # Find boundary edges (edges that appear exactly once in the mesh)
+        edge_count = Counter()
+        for tri in triangulation.triangles:
+            edges = [
+                tuple(sorted([tri[0], tri[1]])),
+                tuple(sorted([tri[1], tri[2]])),
+                tuple(sorted([tri[2], tri[0]]))
+            ]
+            for edge in edges:
+                edge_count[edge] += 1
+        
+        # Extract boundary edges (appear only once)
+        boundary_edges = [e for e, c in edge_count.items() if c == 1]
+        
+        # Draw each boundary edge
+        for edge in boundary_edges:
+            x = [triangulation.x[edge[0]], triangulation.x[edge[1]]]
+            y = [triangulation.y[edge[0]], triangulation.y[edge[1]]]
+            self.canvas.ax.plot(x, y, 'k-', linewidth=0.8, alpha=0.8)
             
     def _on_value_picked(self, x, y, value):
         """Handle value pick from canvas."""
@@ -696,12 +915,16 @@ Time steps: {len(time_dirs)}
         
     def _reset_view(self):
         """Reset view to show full data."""
-        if self.case is None or self.case.points_2d is None:
+        if self.case is None:
+            return
+            
+        points_2d = self.case.get_points_2d()
+        if points_2d is None or len(points_2d) == 0:
             return
             
         # Get data bounds
-        x = self.case.points_2d[:, 0]
-        y = self.case.points_2d[:, 1]
+        x = points_2d[:, 0]
+        y = points_2d[:, 1]
         
         margin = 0.05
         x_range = x.max() - x.min()

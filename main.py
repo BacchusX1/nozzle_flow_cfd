@@ -3,7 +3,7 @@
 Nozzle CFD Design Tool - Main Application Launcher
 
 Professional CFD workflow application with immediate drawing capability.
-Complete geometry design, meshing, simulation, and post-processing workflow.
+Complete geometry design, meshing, SU2 simulation, and post-processing workflow.
 
 Usage:
     python main.py
@@ -11,14 +11,14 @@ Usage:
 Features:
     ✅ Immediate drawing (no start/stop buttons)
     ✅ Advanced meshing with boundary layers
-    ✅ CFD simulation setup
+    ✅ SU2 CFD simulation setup
     ✅ Post-processing visualization
     ✅ Professional dark theme interface
 
 Requirements:
     - PySide6, numpy, matplotlib, scipy
     - Optional: gmsh (for advanced meshing)
-    - Optional: OpenFOAM (for CFD simulation)
+    - Optional: SU2 (for CFD simulation - https://su2code.github.io/)
 """
 
 import sys
@@ -48,7 +48,7 @@ def main():
         
         # Create and show main window
         window = NozzleDesignGUI()
-        window.show()
+        window.showMaximized()
         
         # Run the application
         return app.exec()

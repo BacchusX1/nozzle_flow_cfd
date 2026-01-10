@@ -6,8 +6,9 @@ from typing import List, Tuple
 class GeometryElement:
     """Base class for geometry elements."""
     
-    def __init__(self, element_type: str):
+    def __init__(self, element_type: str, boundary: str = "wall"):
         self.element_type = element_type
+        self.boundary = boundary  # 'wall', 'inlet', 'outlet', or 'symmetry'
         
     def get_points(self) -> List[Tuple[float, float]]:
         """Get points that define this element."""
@@ -28,8 +29,8 @@ class GeometryElement:
 class PolynomialElement(GeometryElement):
     """Polynomial curve element defined by control points."""
     
-    def __init__(self, points: List[Tuple[float, float]], degree: int = None):
-        super().__init__("polynomial")
+    def __init__(self, points: List[Tuple[float, float]], degree: int = None, boundary: str = "wall"):
+        super().__init__("polynomial", boundary)
         self.points = points
         # Auto-determine degree if not specified (max 3, min 1)
         if degree is None:
@@ -105,8 +106,8 @@ class PolynomialElement(GeometryElement):
 class LineElement(GeometryElement):
     """Simple line element between two points."""
     
-    def __init__(self, start: Tuple[float, float], end: Tuple[float, float]):
-        super().__init__("line")
+    def __init__(self, start: Tuple[float, float], end: Tuple[float, float], boundary: str = "wall"):
+        super().__init__("line", boundary)
         self.start = start
         self.end = end
         
@@ -125,8 +126,8 @@ class LineElement(GeometryElement):
 class ArcElement(GeometryElement):
     """Arc element defined by center, radius, start/end angles or by three points."""
     
-    def __init__(self, points=None, center=None, radius=None, start_angle=None, end_angle=None):
-        super().__init__("arc")
+    def __init__(self, points=None, center=None, radius=None, start_angle=None, end_angle=None, boundary: str = "wall"):
+        super().__init__("arc", boundary)
         
         if points is not None:
             # Create from three points

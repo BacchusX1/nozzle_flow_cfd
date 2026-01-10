@@ -1,12 +1,13 @@
 """
 Post-processing Module
 
-Handles visualization and analysis of CFD simulation results,
+Handles visualization and analysis of SU2 CFD simulation results,
 including field plots, contours, streamlines, and data extraction.
 """
 
 import os
 import json
+import csv
 import numpy as np
 from pathlib import Path
 from typing import Dict, List, Tuple, Optional, Any
@@ -16,6 +17,17 @@ import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
 from matplotlib.patches import Polygon
 from matplotlib.collections import LineCollection
+try:
+    import pandas as pd
+    HAS_PANDAS = True
+except ImportError:
+    HAS_PANDAS = False
+
+try:
+    import meshio
+    HAS_MESHIO = True
+except ImportError:
+    HAS_MESHIO = False
 
 
 class FieldType(Enum):
@@ -78,7 +90,7 @@ class ProbeData:
 
 
 class ResultsProcessor:
-    """Main results processing and visualization class."""
+    """Main results processing and visualization class for SU2 output."""
     
     def __init__(self):
         self.case_directory = ""
@@ -87,79 +99,372 @@ class ResultsProcessor:
         self.geometry_data = None
         self.settings = VisualizationSettings()
         self.probes: List[ProbeData] = []
+        self.history_data = None  # SU2 convergence history
         
     def load_case(self, case_directory: str):
-        """Load OpenFOAM case results."""
+        """Load SU2 case results."""
         self.case_directory = case_directory
         
         # Load mesh data
         self._load_mesh_data()
         
-        # Load field data
+        # Load field data from SU2 output
         self._load_field_data()
         
         # Load geometry data if available
         self._load_geometry_data()
         
+        # Load convergence history
+        self._load_history_data()
+        
     def _load_mesh_data(self):
-        """Load mesh data from case."""
+        """Load mesh data from SU2 case."""
+        # Try JSON mesh data first
         mesh_file = os.path.join(self.case_directory, "mesh_data.json")
         if os.path.exists(mesh_file):
             with open(mesh_file, 'r') as f:
                 self.mesh_data = json.load(f)
-        else:
-            # Try to read from OpenFOAM mesh files
-            self._read_openfoam_mesh()
+            return
+            
+        # Try to read from SU2 mesh file
+        self._read_su2_mesh()
             
     def _load_field_data(self):
-        """Load field data from time directories."""
-        # Look for time directories
-        time_dirs = []
-        for item in os.listdir(self.case_directory):
-            try:
-                time_val = float(item)
-                time_dirs.append((time_val, item))
-            except ValueError:
-                continue
-                
-        time_dirs.sort()
+        """Load field data from SU2 output files."""
+        import glob
         
-        # Load latest time step
-        if time_dirs:
-            latest_time = time_dirs[-1][1]
-            self._load_time_step_data(latest_time)
+        # Priority 1: Surface CSV file (reliable SU2 output)
+        surface_csv = os.path.join(self.case_directory, "surface_flow.csv")
+        if os.path.exists(surface_csv):
+            self._load_su2_surface_csv(surface_csv)
             
-    def _load_time_step_data(self, time_dir: str):
-        """Load field data from specific time directory."""
-        time_path = os.path.join(self.case_directory, time_dir)
-        
-        # Load available fields
-        field_files = ['U', 'p', 'k', 'epsilon']
-        self.results_data[time_dir] = {}
-        
-        for field in field_files:
-            field_path = os.path.join(time_path, field)
-            if os.path.exists(field_path):
-                field_data = self._read_openfoam_field(field_path)
-                self.results_data[time_dir][field] = field_data
+        # Priority 2: VTU files (Paraview format from SU2)
+        vtu_files = glob.glob(os.path.join(self.case_directory, "flow*.vtu"))
+        if vtu_files:
+            # Sort to get latest (highest iteration number)
+            vtu_files.sort()
+            self._load_vtu_solution(vtu_files[-1])
+            return
+            
+        # Priority 3: Restart CSV if exists
+        restart_file = os.path.join(self.case_directory, "restart_flow.csv")
+        if os.path.exists(restart_file):
+            self._load_su2_restart_csv(restart_file)
+            return
+            
+        # Priority 4: Legacy VTK format
+        vtk_files = glob.glob(os.path.join(self.case_directory, "*.vtk"))
+        if vtk_files:
+            self._load_vtk_solution(vtk_files[-1])
+            return
+            
+    def _load_su2_restart_csv(self, filepath: str):
+        """Load SU2 restart CSV file."""
+        if HAS_PANDAS:
+            df = pd.read_csv(filepath)
+            self.results_data['latest'] = {}
+            
+            # Map SU2 field names to internal names
+            field_mapping = {
+                'Momentum_x': 'rhoU_x',
+                'Momentum_y': 'rhoU_y',
+                'Momentum_z': 'rhoU_z',
+                'Velocity_x': 'U_x',
+                'Velocity_y': 'U_y',
+                'Velocity_z': 'U_z',
+                'Pressure': 'p',
+                'Temperature': 'T',
+                'Density': 'rho',
+                'Mach': 'Ma',
+                'TKE': 'k',
+                'Omega': 'omega',
+                'Dissipation': 'epsilon',
+                'Nu_Tilde': 'nuTilde'
+            }
+            
+            for su2_name, internal_name in field_mapping.items():
+                if su2_name in df.columns:
+                    self.results_data['latest'][internal_name] = {
+                        'internal_field': df[su2_name].values
+                    }
+                    
+            # Reconstruct velocity vector if components available
+            if 'Velocity_x' in df.columns:
+                u_x = df['Velocity_x'].values if 'Velocity_x' in df.columns else np.zeros(len(df))
+                u_y = df['Velocity_y'].values if 'Velocity_y' in df.columns else np.zeros(len(df))
+                u_z = df.get('Velocity_z', pd.Series(np.zeros(len(df)))).values
                 
-    def _read_openfoam_field(self, field_path: str):
-        """Read OpenFOAM field file (simplified)."""
-        # This is a simplified reader - in practice would need proper OpenFOAM parser
-        # For now, return dummy data
-        return {
-            'internal_field': np.random.random((100, 3)),  # Dummy velocity field
-            'boundary_fields': {}
-        }
+                velocity = np.column_stack([u_x, u_y, u_z])
+                self.results_data['latest']['U'] = {
+                    'internal_field': velocity,
+                    'boundary_fields': {}
+                }
+                
+            # Load coordinates if available
+            if 'x' in df.columns and 'y' in df.columns:
+                coords = np.column_stack([df['x'].values, df['y'].values])
+                self.results_data['latest']['_coordinates'] = coords
+        else:
+            # Fall back to csv module
+            self._load_csv_without_pandas(filepath)
+            
+    def _load_csv_without_pandas(self, filepath: str):
+        """Load CSV file without pandas."""
+        with open(filepath, 'r') as f:
+            reader = csv.DictReader(f)
+            rows = list(reader)
+            
+        if not rows:
+            return
+            
+        self.results_data['latest'] = {}
         
-    def _read_openfoam_mesh(self):
-        """Read OpenFOAM mesh files (simplified)."""
-        # This would read points, faces, cells from polyMesh
-        # For now, create dummy mesh
+        # Extract coordinates
+        if 'x' in rows[0] and 'y' in rows[0]:
+            x = np.array([float(row.get('x', 0)) for row in rows])
+            y = np.array([float(row.get('y', 0)) for row in rows])
+            self.results_data['latest']['_coordinates'] = np.column_stack([x, y])
+            
+        # Extract velocity
+        if 'Velocity_x' in rows[0]:
+            u_x = np.array([float(row.get('Velocity_x', 0)) for row in rows])
+            u_y = np.array([float(row.get('Velocity_y', 0)) for row in rows])
+            u_z = np.array([float(row.get('Velocity_z', 0)) for row in rows])
+            self.results_data['latest']['U'] = {
+                'internal_field': np.column_stack([u_x, u_y, u_z]),
+                'boundary_fields': {}
+            }
+            
+        # Extract pressure
+        if 'Pressure' in rows[0]:
+            p = np.array([float(row.get('Pressure', 0)) for row in rows])
+            self.results_data['latest']['p'] = {'internal_field': p}
+            
+        # Extract temperature
+        if 'Temperature' in rows[0]:
+            T = np.array([float(row.get('Temperature', 0)) for row in rows])
+            self.results_data['latest']['T'] = {'internal_field': T}
+            
+    def _load_su2_surface_csv(self, filepath: str):
+        """Load SU2 surface output CSV file."""
+        if HAS_PANDAS:
+            df = pd.read_csv(filepath)
+            self.results_data['surface'] = {}
+            
+            # Store all columns as fields
+            for col in df.columns:
+                if col not in ['x', 'y', 'z', 'PointID', 'GlobalIndex']:
+                    self.results_data['surface'][col] = df[col].values
+                    
+            # Store coordinates
+            if 'x' in df.columns:
+                self.results_data['surface']['_coordinates'] = np.column_stack([
+                    df['x'].values,
+                    df['y'].values if 'y' in df.columns else np.zeros(len(df))
+                ])
+    
+    def _load_vtk_solution(self, filepath: str):
+        """Load legacy VTK solution file."""
+        self._load_vtu_solution(filepath)
+        
+    def _load_vtu_solution(self, filepath: str):
+        """Load VTU/VTK solution file using meshio or basic XML parsing."""
+        self.results_data['latest'] = {}
+        
+        # Try meshio first (best option)
+        if HAS_MESHIO:
+            try:
+                mesh = meshio.read(filepath)
+                
+                # Store point coordinates
+                points = mesh.points
+                self.results_data['latest']['_coordinates'] = points[:, :2]
+                
+                # Map SU2 field names to internal names
+                field_mapping = {
+                    'Momentum': 'rhoU',
+                    'Velocity': 'U',
+                    'Pressure': 'p',
+                    'Temperature': 'T',
+                    'Density': 'rho',
+                    'Mach': 'Ma',
+                    'Turb_Kin_Energy': 'k',
+                    'Omega': 'omega',
+                }
+                
+                # Load point data
+                for su2_name, data in mesh.point_data.items():
+                    internal_name = field_mapping.get(su2_name, su2_name)
+                    self.results_data['latest'][internal_name] = {
+                        'internal_field': data,
+                        'boundary_fields': {}
+                    }
+                    
+                # Build velocity field if momentum available
+                if 'Momentum' in mesh.point_data and 'Density' in mesh.point_data:
+                    rho = mesh.point_data['Density']
+                    momentum = mesh.point_data['Momentum']
+                    velocity = momentum / rho[:, np.newaxis] if len(momentum.shape) > 1 else momentum / rho
+                    self.results_data['latest']['U'] = {
+                        'internal_field': velocity,
+                        'boundary_fields': {}
+                    }
+                elif 'Velocity' in mesh.point_data:
+                    self.results_data['latest']['U'] = {
+                        'internal_field': mesh.point_data['Velocity'],
+                        'boundary_fields': {}
+                    }
+                    
+                return
+            except Exception as e:
+                print(f"Warning: meshio failed to load {filepath}: {e}")
+        
+        # Fallback: Basic XML parsing for VTU files
+        if filepath.endswith('.vtu'):
+            try:
+                self._parse_vtu_xml(filepath)
+                return
+            except Exception as e:
+                print(f"Warning: VTU XML parsing failed: {e}")
+                
+        # Legacy VTK parser
+        try:
+            with open(filepath, 'r') as f:
+                content = f.read()
+                
+            if 'POINTS' in content:
+                lines = content.split('\n')
+                points_idx = next(i for i, line in enumerate(lines) if 'POINTS' in line)
+                num_points = int(lines[points_idx].split()[1])
+                
+                points = []
+                idx = points_idx + 1
+                while len(points) < num_points:
+                    values = lines[idx].split()
+                    for i in range(0, len(values), 3):
+                        if len(points) < num_points:
+                            points.append([
+                                float(values[i]),
+                                float(values[i+1]) if i+1 < len(values) else 0,
+                                float(values[i+2]) if i+2 < len(values) else 0
+                            ])
+                    idx += 1
+                    
+                self.results_data['latest']['_coordinates'] = np.array(points)[:, :2]
+                
+        except Exception as e:
+            print(f"Warning: Could not parse VTK file: {e}")
+            
+    def _parse_vtu_xml(self, filepath: str):
+        """Parse VTU file using XML parsing (fallback if meshio unavailable)."""
+        import xml.etree.ElementTree as ET
+        import base64
+        import struct
+        
+        tree = ET.parse(filepath)
+        root = tree.getroot()
+        
+        # Find the Piece element
+        piece = root.find('.//Piece')
+        if piece is None:
+            return
+            
+        # Get points
+        points_elem = piece.find('.//Points/DataArray')
+        if points_elem is not None:
+            points_text = points_elem.text.strip()
+            # Try to parse as text (ASCII format)
+            try:
+                values = [float(v) for v in points_text.split()]
+                num_points = len(values) // 3
+                points = np.array(values).reshape(num_points, 3)
+                self.results_data['latest']['_coordinates'] = points[:, :2]
+            except:
+                pass
+                
+        # Get point data
+        for data_array in piece.findall('.//PointData/DataArray'):
+            name = data_array.get('Name', 'unknown')
+            try:
+                values_text = data_array.text.strip()
+                values = np.array([float(v) for v in values_text.split()])
+                
+                # Check if vector (3 components)
+                num_components = int(data_array.get('NumberOfComponents', 1))
+                if num_components > 1:
+                    values = values.reshape(-1, num_components)
+                    
+                self.results_data['latest'][name] = {
+                    'internal_field': values,
+                    'boundary_fields': {}
+                }
+            except:
+                pass
+            
+    def _load_history_data(self):
+        """Load SU2 convergence history."""
+        history_file = os.path.join(self.case_directory, "history.csv")
+        if os.path.exists(history_file):
+            if HAS_PANDAS:
+                self.history_data = pd.read_csv(history_file)
+            else:
+                with open(history_file, 'r') as f:
+                    reader = csv.DictReader(f)
+                    self.history_data = list(reader)
+                    
+    def _read_su2_mesh(self):
+        """Read SU2 mesh file."""
+        # Look for .su2 mesh file
+        import glob
+        mesh_files = glob.glob(os.path.join(self.case_directory, "*.su2"))
+        
+        if not mesh_files:
+            # Create dummy mesh
+            self.mesh_data = {
+                'vertices': np.random.random((100, 2)),
+                'elements': [[i, i+1, i+2] for i in range(0, 97, 3)],
+                'element_type': 'triangle'
+            }
+            return
+            
+        mesh_file = mesh_files[0]
+        
+        vertices = []
+        elements = []
+        
+        with open(mesh_file, 'r') as f:
+            lines = f.readlines()
+            
+        i = 0
+        while i < len(lines):
+            line = lines[i].strip()
+            
+            if line.startswith('NPOIN='):
+                num_points = int(line.split('=')[1].split()[0])
+                for j in range(num_points):
+                    i += 1
+                    parts = lines[i].strip().split()
+                    x, y = float(parts[0]), float(parts[1])
+                    vertices.append([x, y])
+                    
+            elif line.startswith('NELEM='):
+                num_elems = int(line.split('=')[1].split()[0])
+                for j in range(num_elems):
+                    i += 1
+                    parts = lines[i].strip().split()
+                    elem_type = int(parts[0])
+                    # Triangle: 5, Quad: 9
+                    if elem_type == 5:  # Triangle
+                        elements.append([int(parts[1]), int(parts[2]), int(parts[3])])
+                    elif elem_type == 9:  # Quad
+                        elements.append([int(parts[1]), int(parts[2]), int(parts[3]), int(parts[4])])
+                        
+            i += 1
+            
         self.mesh_data = {
-            'vertices': np.random.random((100, 2)),
-            'elements': [[i, i+1, i+2] for i in range(0, 97, 3)],
-            'element_type': 'triangle'
+            'vertices': np.array(vertices),
+            'elements': elements,
+            'element_type': 'mixed'
         }
         
     def _load_geometry_data(self):
@@ -273,9 +578,74 @@ class ResultsProcessor:
         return {'vertices': vertices, 'values': values}
         
     def _create_contour_plot(self, ax, field_data):
-        """Create contour plot."""
+        """Create contour plot using mesh triangulation for proper geometry boundaries."""
+        import matplotlib.tri as mtri
+        
+        # Priority 1: Use mesh-based triangulation (respects geometry boundaries)
+        if self.mesh_data and 'vertices' in self.mesh_data:
+            vertices = np.array(self.mesh_data['vertices'])
+            elements = self.mesh_data.get('elements', [])
+            
+            # Get field values
+            if 'values' in field_data:
+                values = field_data['values']
+            elif 'data' in field_data:
+                # Structured data - flatten
+                values = field_data['data'].flatten()
+            else:
+                values = None
+                
+            if values is not None and len(values) == len(vertices):
+                # Convert elements to triangles
+                triangles = []
+                for elem in elements:
+                    if len(elem) == 3:
+                        triangles.append(elem)
+                    elif len(elem) == 4:
+                        # Split quad into two triangles
+                        triangles.append((elem[0], elem[1], elem[2]))
+                        triangles.append((elem[0], elem[2], elem[3]))
+                        
+                if triangles:
+                    try:
+                        triang = mtri.Triangulation(
+                            vertices[:, 0], vertices[:, 1], triangles=triangles
+                        )
+                        
+                        if self.settings.filled_contours:
+                            contour = ax.tricontourf(triang, values, 
+                                                    levels=self.settings.num_levels,
+                                                    cmap=self.settings.colormap)
+                        else:
+                            contour = ax.tricontour(triang, values,
+                                                   levels=self.settings.num_levels,
+                                                   cmap=self.settings.colormap)
+                                                   
+                        if self.settings.show_colorbar:
+                            plt.colorbar(contour, ax=ax, label=self.settings.field_type.value)
+                        return
+                    except Exception as e:
+                        print(f"Triangulation failed: {e}, falling back to scatter")
+                        
+                # Fallback: Delaunay triangulation
+                try:
+                    triang = mtri.Triangulation(vertices[:, 0], vertices[:, 1])
+                    if self.settings.filled_contours:
+                        contour = ax.tricontourf(triang, values,
+                                                levels=self.settings.num_levels,
+                                                cmap=self.settings.colormap)
+                    else:
+                        contour = ax.tricontour(triang, values,
+                                               levels=self.settings.num_levels,
+                                               cmap=self.settings.colormap)
+                    if self.settings.show_colorbar:
+                        plt.colorbar(contour, ax=ax, label=self.settings.field_type.value)
+                    return
+                except Exception as e:
+                    print(f"Delaunay triangulation failed: {e}")
+                    
+        # Fallback 2: Structured grid data
         if 'X' in field_data and 'Y' in field_data:
-            # Structured data
             X, Y, data = field_data['X'], field_data['Y'], field_data['data']
             
             if self.settings.filled_contours:
@@ -289,16 +659,28 @@ class ResultsProcessor:
                 plt.colorbar(contour, ax=ax, label=self.settings.field_type.value)
                 
         elif 'vertices' in field_data:
-            # Unstructured data - create triangulation
+            # Unstructured data with vertices - use triangulation
             vertices = field_data['vertices']
             values = field_data['values']
             
-            # Simple scatter plot for now
-            scatter = ax.scatter(vertices[:, 0], vertices[:, 1], c=values, 
-                               cmap=self.settings.colormap, s=20)
-            
-            if self.settings.show_colorbar:
-                plt.colorbar(scatter, ax=ax, label=self.settings.field_type.value)
+            try:
+                triang = mtri.Triangulation(vertices[:, 0], vertices[:, 1])
+                if self.settings.filled_contours:
+                    contour = ax.tricontourf(triang, values, 
+                                            levels=self.settings.num_levels,
+                                            cmap=self.settings.colormap)
+                else:
+                    contour = ax.tricontour(triang, values,
+                                           levels=self.settings.num_levels,
+                                           cmap=self.settings.colormap)
+                if self.settings.show_colorbar:
+                    plt.colorbar(contour, ax=ax, label=self.settings.field_type.value)
+            except Exception:
+                # Ultimate fallback: scatter plot
+                scatter = ax.scatter(vertices[:, 0], vertices[:, 1], c=values, 
+                                   cmap=self.settings.colormap, s=20)
+                if self.settings.show_colorbar:
+                    plt.colorbar(scatter, ax=ax, label=self.settings.field_type.value)
                 
     def _create_streamline_plot(self, ax, field_data):
         """Create streamline plot."""

@@ -1,8 +1,23 @@
 {
   "name": "De Laval Nozzle",
-  "description": "Classic converging-diverging nozzle for supersonic flow",
+  "description": "Classic converging-diverging nozzle for supersonic flow with inlet/outlet sections",
   "type": "de_laval",
+  "parameters": {
+    "inlet_diameter": 0.6,
+    "throat_diameter": 0.1,
+    "outlet_diameter": 0.5,
+    "inlet_section_length_factor": 1.5,
+    "outlet_section_length_factor": 3.0
+  },
   "elements": [
+    {
+      "type": "LineElement",
+      "control_points": [
+        [-0.45, 0.3],
+        [0.0, 0.3]
+      ],
+      "description": "Inlet section (1.5 * d_in)"
+    },
     {
       "type": "PolynomialElement",
       "control_points": [
@@ -26,16 +41,34 @@
       "control_points": [
         [0.7, 0.05],
         [1.0, 0.15],
-        [1.5, 0.25]
+        [1.3, 0.23]
       ],
       "description": "Diverging section"
+    },
+    {
+      "type": "PolynomialElement",
+      "control_points": [
+        [1.3, 0.23],
+        [1.5, 0.25],
+        [1.7, 0.25]
+      ],
+      "description": "Transition section (smooth blend to horizontal)"
+    },
+    {
+      "type": "LineElement",
+      "control_points": [
+        [1.7, 0.25],
+        [3.0, 0.25]
+      ],
+      "description": "Outlet section (3 * d_out)"
     }
   ],
   "flow_conditions": {
-    "inlet_pressure": 300000,
-    "outlet_pressure": 101325,
-    "inlet_temperature": 300,
-    "design_mach": 2.0
+    "inlet_total_pressure": 500000,
+    "inlet_total_temperature": 300,
+    "outlet_static_pressure": 50000,
+    "design_mach": 2.0,
+    "note": "Pressure ratio ~10:1 for fully supersonic expansion"
   },
   "mesh_settings": {
     "element_size": 0.005,

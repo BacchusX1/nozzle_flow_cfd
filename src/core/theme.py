@@ -3,73 +3,116 @@ World-Class Modern UI Theme for Nozzle CFD Design Tool
 
 An absolutely stunning dark theme with premium styling, advanced animations,
 and professional-grade visual design inspired by the best modern applications.
+
+Configuration is loaded from configuration.yaml at the project root.
 """
 
+import os
+import yaml
+from pathlib import Path
+
+
+def _load_configuration():
+    """Load configuration from configuration.yaml file."""
+    config = {}
+    
+    # Look for configuration.yaml in common locations
+    search_paths = [
+        Path(__file__).parent.parent.parent / "configuration.yaml",  # project root
+        Path.cwd() / "configuration.yaml",  # current working directory
+        Path.home() / ".nozzle_cfd" / "configuration.yaml",  # user home
+    ]
+    
+    for config_path in search_paths:
+        if config_path.exists():
+            # Strict loading: propagate exceptions if file exists but fails to parse
+            with open(config_path, 'r') as f:
+                config = yaml.safe_load(f) or {}
+            break
+    
+    return config
+
+
+# Load configuration at module import time
+_CONFIG = _load_configuration()
+
+
 class Theme:
-    """World-class dark theme with premium styling and advanced visual effects."""
+    """World-class dark theme with premium styling and advanced visual effects.
+    
+    Values can be customized via configuration.yaml at the project root.
+    """
+    
+    # Configuration accessors for sub-sections
+    _theme_cfg = _CONFIG.get('theme', {})
+    _typography_cfg = _CONFIG.get('typography', {})
+    _buttons_cfg = _CONFIG.get('buttons', {})
+    _layout_cfg = _CONFIG.get('layout', {})
+    _display_cfg = _CONFIG.get('display', {})
     
     # Core Background Colors - Modern sophisticated palette
-    BACKGROUND = '#0d1117'           # GitHub-like dark background
-    SURFACE = '#161b22'              # Elevated surface with subtle contrast
-    SURFACE_VARIANT = '#21262d'      # Cards and containers
-    SURFACE_ELEVATED = '#30363d'     # Highest elevation surfaces
+    BACKGROUND = _theme_cfg.get('background', '#0d1117')
+    SURFACE = _theme_cfg.get('surface', '#161b22')
+    SURFACE_VARIANT = _theme_cfg.get('surface_variant', '#21262d')
+    SURFACE_ELEVATED = _theme_cfg.get('surface_elevated', '#30363d')
+
     SECONDARY = '#484f58'            # Secondary surface elements
     
-    # Modern Accent Colors - Muted and professional
-    PRIMARY = '#58a6ff'              # Soft blue for modern feel
-    PRIMARY_VARIANT = '#388bfd'      # Darker blue for depth
-    PRIMARY_LIGHT = '#79c0ff'        # Lighter blue for highlights
-    ACCENT = '#f78166'               # Muted coral/orange for warmth
-    ACCENT_VARIANT = '#e36749'       # Darker coral for interactions
-    ACCENT_LIGHT = '#ffa28b'         # Light coral for subtle highlights
+    # Modern Accent Colors - Configurable via configuration.yaml
+    PRIMARY = _theme_cfg.get('primary', '#58a6ff')
+    PRIMARY_VARIANT = _theme_cfg.get('primary_variant', '#388bfd')
+    PRIMARY_LIGHT = _theme_cfg.get('primary_light', '#79c0ff')
+    ACCENT = _theme_cfg.get('accent', '#f78166')
+    ACCENT_VARIANT = _theme_cfg.get('accent_variant', '#e36749')
+    ACCENT_LIGHT = _theme_cfg.get('accent_light', '#ffa28b')
     
-    # Professional Status Colors - Muted and elegant
-    SUCCESS = '#3fb950'              # Muted green for success
+    # Professional Status Colors - Configurable
+    SUCCESS = _theme_cfg.get('success', '#3fb950')
     SUCCESS_VARIANT = '#2ea043'      # Deeper green
-    WARNING = '#d29922'              # Warm amber for warnings
+    WARNING = _theme_cfg.get('warning', '#d29922')
     WARNING_VARIANT = '#bf8700'      # Deeper warning amber
-    ERROR = '#f85149'                # Muted red for errors
+    ERROR = _theme_cfg.get('error', '#f85149')
     ERROR_VARIANT = '#da3633'        # Deeper error red
-    INFO = '#58a6ff'                 # Same as primary for consistency
+    INFO = _theme_cfg.get('info', '#58a6ff')
     INFO_VARIANT = '#388bfd'         # Deeper info blue
     
-    # Modern High Contrast Text - Clean and readable
-    TEXT_PRIMARY = '#f0f6fc'         # Soft white for maximum readability
-    TEXT_SECONDARY = '#8b949e'       # Muted gray for secondary text
-    TEXT_TERTIARY = '#6e7681'        # Subtle gray for less important info
+    # Modern High Contrast Text - Configurable
+    TEXT_PRIMARY = _theme_cfg.get('text_primary', '#f0f6fc')
+    TEXT_SECONDARY = _theme_cfg.get('text_secondary', '#8b949e')
+    TEXT_TERTIARY = _theme_cfg.get('text_tertiary', '#6e7681')
     TEXT_INVERSE = '#0d1117'         # Dark text for light backgrounds
-    TEXT_ACCENT = '#58a6ff'          # Accent text color (muted blue)
-    TEXT_SUCCESS = '#3fb950'         # Success text color (muted green)
-    TEXT_WARNING = '#d29922'         # Warning text color (muted amber)
-    TEXT_ERROR = '#f85149'           # Error text color (muted red)
+    TEXT_ACCENT = _theme_cfg.get('primary', '#58a6ff')
+    TEXT_SUCCESS = _theme_cfg.get('success', '#3fb950')
+    TEXT_WARNING = _theme_cfg.get('warning', '#d29922')
+    TEXT_ERROR = _theme_cfg.get('error', '#f85149')
     
     # Backward compatibility
     TEXT = TEXT_PRIMARY              # Alias for old theme references
     
-    # Modern Interactive Elements - Muted and professional
-    BUTTON_PRIMARY = '#58a6ff'       # Soft blue primary buttons
-    BUTTON_PRIMARY_HOVER = '#79c0ff' # Lighter blue on hover
-    BUTTON_PRIMARY_ACTIVE = '#388bfd' # Darker when pressed
+    # Modern Interactive Elements - Derived from primary/accent colors
+    BUTTON_PRIMARY = _theme_cfg.get('primary', '#58a6ff')
+    BUTTON_PRIMARY_HOVER = _theme_cfg.get('primary_light', '#79c0ff')
+    BUTTON_PRIMARY_ACTIVE = _theme_cfg.get('primary_variant', '#388bfd')
     BUTTON_SECONDARY = '#30363d'     # Muted secondary buttons
     BUTTON_SECONDARY_HOVER = '#484f58' # Lighter on hover
-    BUTTON_DANGER = '#f85149'        # Muted danger buttons
+    BUTTON_DANGER = _theme_cfg.get('error', '#f85149')
     BUTTON_DANGER_HOVER = '#ff6b6b'  # Lighter danger on hover
-    BUTTON_SUCCESS = '#3fb950'       # Muted success action buttons
+    BUTTON_SUCCESS = _theme_cfg.get('success', '#3fb950')
     BUTTON_SUCCESS_HOVER = '#56d364' # Lighter success on hover
     
-    # Modern Borders and Dividers - Subtle and clean
-    BORDER = '#30363d'               # Subtle borders
-    BORDER_SUBTLE = '#21262d'        # Very subtle borders
-    BORDER_ACCENT = '#58a6ff'        # Accent borders for focus
-    BORDER_SUCCESS = '#3fb950'       # Success state borders
-    BORDER_WARNING = '#d29922'       # Warning state borders
-    BORDER_ERROR = '#f85149'         # Error state borders
+    # Modern Borders and Dividers - Configurable
+    BORDER = _theme_cfg.get('border', '#30363d')
+    BORDER_SUBTLE = _theme_cfg.get('border_subtle', '#21262d')
+    BORDER_ACCENT = _theme_cfg.get('border_accent', '#58a6ff')
+    BORDER_SUCCESS = _theme_cfg.get('success', '#3fb950')
+    BORDER_WARNING = _theme_cfg.get('warning', '#d29922')
+    BORDER_ERROR = _theme_cfg.get('error', '#f85149')
     
-    # Modern Input Elements - Clean and minimal
-    INPUT_BACKGROUND = '#0d1117'     # Clean input backgrounds
-    INPUT_BORDER = '#30363d'         # Input borders
-    INPUT_BORDER_FOCUS = '#58a6ff'   # Blue focus borders
-    INPUT_BORDER_ERROR = '#f85149'   # Error state borders
+    # Modern Input Elements - Configurable
+    INPUT_BACKGROUND = _theme_cfg.get('input_background', '#0d1117')
+    INPUT_BORDER = _theme_cfg.get('input_border', '#30363d')
+    INPUT_BORDER_FOCUS = _theme_cfg.get('input_border_focus', '#58a6ff')
+    INPUT_BORDER_ERROR = _theme_cfg.get('error', '#f85149')
     INPUT_PLACEHOLDER = '#6e7681'    # Placeholder text
     INPUT_SELECTION = 'rgba(88, 166, 255, 0.3)' # Selection highlight
     
@@ -82,49 +125,83 @@ class Theme:
     HIGHLIGHT = 'rgba(88, 166, 255, 0.1)'    # Selection highlight
     HIGHLIGHT_STRONG = 'rgba(88, 166, 255, 0.2)' # Strong highlight
     
-    # Modern Canvas and Graphics - Clean and professional
-    CANVAS_BACKGROUND = '#0d1117'    # Clean canvas background
-    GRID_MAJOR = '#30363d'           # Major grid lines
-    GRID_MINOR = '#21262d'           # Minor grid lines
-    GEOMETRY_LINE = '#58a6ff'        # Soft blue geometry lines
-    GEOMETRY_POINT = '#f78166'       # Coral geometry points
-    GEOMETRY_SELECTED = '#3fb950'    # Green for selected elements
-    MESH_LINE = '#6e7681'            # Gray mesh lines
+    # Modern Canvas and Graphics - Configurable
+    CANVAS_BACKGROUND = _theme_cfg.get('canvas_background', '#0d1117')
+    GRID_MAJOR = _theme_cfg.get('grid_major', '#30363d')
+    GRID_MINOR = _theme_cfg.get('grid_minor', '#21262d')
+    GEOMETRY_LINE = _theme_cfg.get('geometry_line', '#58a6ff')
+    GEOMETRY_POINT = _theme_cfg.get('geometry_point', '#f78166')
+    GEOMETRY_SELECTED = _theme_cfg.get('geometry_selected', '#3fb950')
+    MESH_LINE = _theme_cfg.get('mesh_line', '#6e7681')
     MESH_NODE = '#f85149'            # Muted red mesh nodes
-    MESH_BOUNDARY = '#d29922'        # Amber boundary elements
+    MESH_BOUNDARY = _theme_cfg.get('mesh_boundary', '#d29922')
     
-    # Typography Scale - Professional hierarchy (SMALLER SIZES)
-    FONT_SIZE_TINY = 9
-    FONT_SIZE_SMALL = 10
-    FONT_SIZE_NORMAL = 11
-    FONT_SIZE_MEDIUM = 12
-    FONT_SIZE_LARGE = 14
-    FONT_SIZE_XLARGE = 16
-    FONT_SIZE_TITLE = 18
-    FONT_SIZE_HERO = 22
+    # Typography Scale - Configurable via configuration.yaml (4K OPTIMIZED)
+    FONT_SIZE_TINY = _typography_cfg.get('font_size_tiny', 13)
+    FONT_SIZE_SMALL = _typography_cfg.get('font_size_small', 14)
+    FONT_SIZE_NORMAL = _typography_cfg.get('font_size_normal', 16)
+    FONT_SIZE_MEDIUM = _typography_cfg.get('font_size_medium', 18)
+    FONT_SIZE_LARGE = _typography_cfg.get('font_size_large', 20)
+    FONT_SIZE_XLARGE = _typography_cfg.get('font_size_xlarge', 24)
+    FONT_SIZE_TITLE = _typography_cfg.get('font_size_title', 28)
+    FONT_SIZE_HERO = _typography_cfg.get('font_size_hero', 34)
     
-    # Font weights for premium typography
-    FONT_WEIGHT_LIGHT = 300
-    FONT_WEIGHT_NORMAL = 400
-    FONT_WEIGHT_MEDIUM = 500
-    FONT_WEIGHT_SEMIBOLD = 600
-    FONT_WEIGHT_BOLD = 700
+    # Font weights for premium typography - Configurable
+    FONT_WEIGHT_LIGHT = _typography_cfg.get('font_weight_light', 300)
+    FONT_WEIGHT_NORMAL = _typography_cfg.get('font_weight_normal', 400)
+    FONT_WEIGHT_MEDIUM = _typography_cfg.get('font_weight_medium', 500)
+    FONT_WEIGHT_SEMIBOLD = _typography_cfg.get('font_weight_semibold', 600)
+    FONT_WEIGHT_BOLD = _typography_cfg.get('font_weight_bold', 700)
     FONT_WEIGHT_BLACK = 900
     
-    # Spacing Scale - Perfect proportions
-    SPACING_XS = 4
-    SPACING_SM = 8
-    SPACING_MD = 16
-    SPACING_LG = 24
-    SPACING_XL = 32
-    SPACING_XXL = 48
+    # Spacing Scale - Configurable (4K OPTIMIZED)
+    SPACING_XS = _layout_cfg.get('spacing_xs', 8)
+    SPACING_SM = _layout_cfg.get('spacing_sm', 14)
+    SPACING_MD = _layout_cfg.get('spacing_md', 24)
+    SPACING_LG = _layout_cfg.get('spacing_lg', 36)
+    SPACING_XL = _layout_cfg.get('spacing_xl', 48)
+    SPACING_XXL = _layout_cfg.get('spacing_xxl', 72)
     
-    # Border Radius Scale - Modern rounded corners
-    RADIUS_SM = 6
-    RADIUS_MD = 10
-    RADIUS_LG = 14
-    RADIUS_XL = 20
+    # Border Radius Scale - Configurable (4K OPTIMIZED)
+    RADIUS_SM = _layout_cfg.get('radius_sm', 10)
+    RADIUS_MD = _layout_cfg.get('radius_md', 14)
+    RADIUS_LG = _layout_cfg.get('radius_lg', 20)
+    RADIUS_XL = _layout_cfg.get('radius_xl', 28)
     RADIUS_ROUND = 50
+    
+    # Button styling from configuration
+    BUTTON_MIN_HEIGHT = _buttons_cfg.get('min_height', 40)
+    BUTTON_MIN_WIDTH = _buttons_cfg.get('min_width', 100)
+    BUTTON_PADDING_H = _buttons_cfg.get('padding_horizontal', 24)
+    BUTTON_PADDING_V = _buttons_cfg.get('padding_vertical', 10)
+    BUTTON_BORDER_WIDTH = _buttons_cfg.get('border_width', 2)
+    BUTTON_BORDER_RADIUS = _buttons_cfg.get('border_radius', 8)
+    BUTTON_DEFAULT_STYLE = _buttons_cfg.get('default_style', 'outlined')
+    
+    # Layout configuration
+    INPUT_PANEL_MIN_WIDTH = _layout_cfg.get('input_panel_min_width', 520)
+    BOTTOM_PANEL_MIN_HEIGHT = _layout_cfg.get('bottom_panel_min_height', 150)
+    SPLITTER_PANEL_RATIO = _layout_cfg.get('splitter_panel_ratio', 35)
+    SPLITTER_CANVAS_RATIO = _layout_cfg.get('splitter_canvas_ratio', 65)
+    SPLITTER_BOTTOM_RATIO = _layout_cfg.get('splitter_bottom_ratio', 20)
+    
+    # Display scaling configuration
+    DISPLAY_AUTO_SCALE = _display_cfg.get('auto_scale', True)
+    DISPLAY_SCALE_FACTOR = _display_cfg.get('scale_factor', None)
+    DISPLAY_MIN_SCALE = _display_cfg.get('min_scale', 1.0)
+    DISPLAY_MAX_SCALE = _display_cfg.get('max_scale', 2.5)
+    
+    @classmethod
+    def reload_configuration(cls):
+        """Reload configuration from file. Call this to apply changes without restart."""
+        global _CONFIG
+        _CONFIG = _load_configuration()
+        # Update class-level config references
+        cls._theme_cfg = _CONFIG.get('theme', {})
+        cls._typography_cfg = _CONFIG.get('typography', {})
+        cls._buttons_cfg = _CONFIG.get('buttons', {})
+        cls._layout_cfg = _CONFIG.get('layout', {})
+        cls._display_cfg = _CONFIG.get('display', {})
     
     @classmethod
     def get_gradient(cls, color1, color2, direction="vertical", stops=None):
