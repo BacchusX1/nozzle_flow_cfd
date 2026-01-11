@@ -603,6 +603,133 @@ class InteractiveGeometryCanvas(FigureCanvas):
                 self.draw()
 
 
+class InteractiveMeshCanvas(FigureCanvas):
+    """
+    Interactive matplotlib canvas for mesh visualization with:
+    - Scroll to zoom
+    - Left/Middle mouse drag to pan
+    - Equal aspect ratio maintained
+    - Proper boundary color legend
+    """
+    
+    def __init__(self, parent=None, width=10, height=6, dpi=100, facecolor='#1e1e1e'):
+        self.fig = Figure(figsize=(width, height), dpi=dpi, facecolor=facecolor)
+        self.ax = self.fig.add_subplot(111, facecolor='#1e1e1e')
+        
+        super().__init__(self.fig)
+        self.setParent(parent)
+        
+        # Pan state
+        self._pan_active = False
+        self._pan_start = None
+        self._xlim_start = None
+        self._ylim_start = None
+        
+        # Store original limits for reset
+        self._original_xlim = None
+        self._original_ylim = None
+        
+        # Connect events
+        self.mpl_connect('scroll_event', self._on_scroll)
+        self.mpl_connect('button_press_event', self._on_press)
+        self.mpl_connect('button_release_event', self._on_release)
+        self.mpl_connect('motion_notify_event', self._on_motion)
+        
+        # Style axes
+        self._style_axes()
+        
+    def _style_axes(self):
+        """Apply dark theme styling to axes."""
+        text_color = '#e0e0e0'
+        border_color = '#404040'
+        
+        self.ax.set_xlabel('X [m]', color=text_color)
+        self.ax.set_ylabel('Y [m]', color=text_color)
+        self.ax.tick_params(colors=text_color)
+        for spine in self.ax.spines.values():
+            spine.set_color(border_color)
+        self.ax.grid(True, alpha=0.2, color='#606060', linestyle='--')
+        
+    def store_original_limits(self):
+        """Store current limits as original for reset."""
+        self._original_xlim = self.ax.get_xlim()
+        self._original_ylim = self.ax.get_ylim()
+        
+    def reset_view(self):
+        """Reset view to original limits."""
+        if self._original_xlim and self._original_ylim:
+            self.ax.set_xlim(self._original_xlim)
+            self.ax.set_ylim(self._original_ylim)
+            self.draw()
+        
+    def _on_scroll(self, event):
+        """Handle scroll events for zooming."""
+        if event.inaxes != self.ax:
+            return
+            
+        base_scale = 1.15
+        if event.button == 'up':
+            scale_factor = 1 / base_scale
+        elif event.button == 'down':
+            scale_factor = base_scale
+        else:
+            return
+            
+        xlim = self.ax.get_xlim()
+        ylim = self.ax.get_ylim()
+        
+        xdata = event.xdata
+        ydata = event.ydata
+        
+        if xdata is None or ydata is None:
+            return
+        
+        new_width = (xlim[1] - xlim[0]) * scale_factor
+        new_height = (ylim[1] - ylim[0]) * scale_factor
+        
+        relx = (xlim[1] - xdata) / (xlim[1] - xlim[0])
+        rely = (ylim[1] - ydata) / (ylim[1] - ylim[0])
+        
+        self.ax.set_xlim([xdata - new_width * (1 - relx), xdata + new_width * relx])
+        self.ax.set_ylim([ydata - new_height * (1 - rely), ydata + new_height * rely])
+        
+        self.draw()
+        
+    def _on_press(self, event):
+        """Handle mouse press events."""
+        if event.inaxes != self.ax:
+            return
+        
+        # Left or middle mouse button for pan
+        if event.button in [1, 2]:
+            self._pan_active = True
+            self._pan_start = (event.xdata, event.ydata)
+            self._xlim_start = self.ax.get_xlim()
+            self._ylim_start = self.ax.get_ylim()
+            
+    def _on_release(self, event):
+        """Handle mouse release events."""
+        if event.button in [1, 2]:
+            self._pan_active = False
+            self._pan_start = None
+            
+    def _on_motion(self, event):
+        """Handle mouse motion events for panning."""
+        if not self._pan_active or self._pan_start is None:
+            return
+            
+        if event.inaxes != self.ax or event.xdata is None:
+            return
+            
+        dx = self._pan_start[0] - event.xdata
+        dy = self._pan_start[1] - event.ydata
+        
+        self.ax.set_xlim(self._xlim_start[0] + dx, self._xlim_start[1] + dx)
+        self.ax.set_ylim(self._ylim_start[0] + dy, self._ylim_start[1] + dy)
+        
+        self.draw()
+
+
 class NozzleDesignGUI(QMainWindow):
     """Professional CFD workflow application with intuitive interface and comprehensive features."""
     
@@ -4073,22 +4200,12 @@ class NozzleDesignGUI(QMainWindow):
         return tab
         
     def create_mesh_canvas(self):
-        """Create mesh visualization canvas."""
-        canvas = FigureCanvas(Figure(figsize=(10, 6), facecolor=Theme.BACKGROUND))
+        """Create interactive mesh visualization canvas with zoom/pan support."""
+        canvas = InteractiveMeshCanvas(self, width=10, height=6, facecolor=Theme.BACKGROUND)
         
-        ax = canvas.figure.add_subplot(111, facecolor='#1e1e1e')
-        ax.set_xlabel('X [m]', color=Theme.TEXT)
-        ax.set_ylabel('Y [m]', color=Theme.TEXT)
-        ax.grid(True, alpha=0.3, color=Theme.TEXT_SECONDARY)
-        ax.tick_params(colors=Theme.TEXT)
-        for spine in ax.spines.values():
-            spine.set_color(Theme.BORDER)
-            
-        canvas.ax = ax
-        
-        # Initial display
-        ax.text(0.5, 0.5, 'Generate mesh to visualize', 
-               transform=ax.transAxes, ha='center', va='center',
+        # Initial display message
+        canvas.ax.text(0.5, 0.5, 'Generate mesh to visualize\n\nControls:\n• Scroll to zoom\n• Drag to pan', 
+               transform=canvas.ax.transAxes, ha='center', va='center',
                color=Theme.TEXT_SECONDARY, fontsize=14)
         
         return canvas
@@ -5560,7 +5677,14 @@ class NozzleDesignGUI(QMainWindow):
         self.mesh_canvas.draw()
         
     def visualize_mesh_data(self, mesh_data):
-        """Visualize mesh data directly in canvas."""
+        """Visualize mesh data directly in canvas with proper boundary colors.
+        
+        Boundary naming convention:
+        - inlet: Green - left boundary where flow enters
+        - outlet: Red - right boundary where flow exits  
+        - wall: Blue - solid walls (includes wall_upper, wall_lower)
+        - symmetry/centerline: Orange - symmetry axis (if present)
+        """
         try:
             self.mesh_canvas.ax.clear()
             
@@ -5580,7 +5704,7 @@ class NozzleDesignGUI(QMainWindow):
                 x_coords = nodes_array[:, 0]
                 y_coords = nodes_array[:, 1]
                 
-                # Plot mesh elements (edges)
+                # Plot mesh elements (edges) with lighter color
                 for elem in elements:
                     if len(elem) >= 3:
                         # Create closed polygon for element
@@ -5590,39 +5714,60 @@ class NozzleDesignGUI(QMainWindow):
                         elem_x = [coord[0] for coord in elem_coords]
                         elem_y = [coord[1] for coord in elem_coords]
                         
-                        # Plot element edges
-                        self.mesh_canvas.ax.plot(elem_x, elem_y, 'b-', linewidth=0.5, alpha=0.7)
+                        # Plot element edges in subtle gray
+                        self.mesh_canvas.ax.plot(elem_x, elem_y, color='#4a4a4a', linewidth=0.3, alpha=0.6)
                 
-                # Plot nodes as small dots
-                self.mesh_canvas.ax.scatter(x_coords, y_coords, s=1, c='red', alpha=0.8, zorder=5)
-                
-                # Highlight boundaries if available
+                # Get boundary elements from mesh data
                 boundary_elements = mesh_data.get('boundary_elements', {})
                 
-                # Plot different boundaries in different colors
+                # Define boundary colors matching what goes into SU2 simulation
+                # These are the actual boundary condition types
                 boundary_colors = {
-                    'inlet': 'green',
-                    'outlet': 'red', 
-                    'wall_upper': 'blue',
-                    'wall_lower': 'blue',
-                    'centerline': 'orange'
+                    # Primary boundaries (what SU2 uses)
+                    'inlet': '#00ff00',      # Bright green
+                    'outlet': '#ff4444',     # Bright red  
+                    'wall': '#4488ff',       # Bright blue
+                    'symmetry': '#ffaa00',   # Orange
+                    # Legacy/alternative names (mapped to primary)
+                    'wall_upper': '#4488ff', # Blue (same as wall)
+                    'wall_lower': '#4488ff', # Blue (same as wall)
+                    'centerline': '#ffaa00', # Orange (same as symmetry)
+                    'farfield': '#aa44ff',   # Purple
                 }
                 
+                # Track which boundary types are actually present for legend
+                boundaries_plotted = {}  # name -> color
+                
                 for boundary_name, boundary_elems in boundary_elements.items():
-                    color = boundary_colors.get(boundary_name, 'black')
+                    if not boundary_elems:
+                        continue
+                        
+                    color = boundary_colors.get(boundary_name, '#888888')
+                    
+                    # Normalize name for legend (combine wall_upper/wall_lower into wall)
+                    legend_name = boundary_name
+                    if boundary_name in ('wall_upper', 'wall_lower'):
+                        legend_name = 'wall'
+                    elif boundary_name == 'centerline':
+                        legend_name = 'symmetry'
                     
                     for boundary_elem in boundary_elems:
                         if len(boundary_elem) >= 2:
-                            # Plot boundary edge
+                            # Plot boundary edge with thick line
                             edge_coords = [nodes_array[i] for i in boundary_elem]
                             edge_x = [coord[0] for coord in edge_coords]
                             edge_y = [coord[1] for coord in edge_coords]
                             
-                            self.mesh_canvas.ax.plot(edge_x, edge_y, color=color, linewidth=2, alpha=0.8)
+                            self.mesh_canvas.ax.plot(edge_x, edge_y, color=color, 
+                                                    linewidth=3, alpha=0.9, solid_capstyle='round')
+                    
+                    # Track for legend (use normalized name)
+                    if legend_name not in boundaries_plotted:
+                        boundaries_plotted[legend_name] = color
                 
                 # Set equal aspect ratio and add grid
                 self.mesh_canvas.ax.set_aspect('equal')
-                self.mesh_canvas.ax.grid(True, alpha=0.3)
+                self.mesh_canvas.ax.grid(True, alpha=0.2, color='#606060', linestyle='--')
                 
                 # Add title with mesh statistics
                 num_nodes = stats.get('num_nodes', len(nodes_array))
@@ -5630,26 +5775,51 @@ class NozzleDesignGUI(QMainWindow):
                 element_type = stats.get('element_type', 'unknown')
                 quality = stats.get('avg_quality', 0)
                 
-                title = f"Mesh: {num_nodes} nodes, {num_elements} {element_type} elements"
+                title = f"Mesh: {num_nodes:,} nodes, {num_elements:,} {element_type} elements"
                 if quality > 0:
-                    title += f", Quality: {quality:.2f}"
+                    title += f" | Quality: {quality:.2f}"
                 
-                self.mesh_canvas.ax.set_title(title, fontsize=10, color=Theme.TEXT)
+                self.mesh_canvas.ax.set_title(title, fontsize=11, color=Theme.TEXT, fontweight='bold')
                 self.mesh_canvas.ax.set_xlabel('x [m]', color=Theme.TEXT)
                 self.mesh_canvas.ax.set_ylabel('y [m]', color=Theme.TEXT)
+                self.mesh_canvas.ax.tick_params(colors=Theme.TEXT)
                 
                 # Set background color to match theme
-                self.mesh_canvas.ax.set_facecolor(Theme.CANVAS_BACKGROUND)
+                self.mesh_canvas.ax.set_facecolor('#1e1e1e')
                 
-                # Add legend for boundaries
-                if boundary_elements:
+                # Add legend for boundaries that are actually present
+                if boundaries_plotted:
+                    # Define legend order and labels
+                    legend_order = ['inlet', 'outlet', 'wall', 'symmetry', 'farfield']
+                    legend_labels = {
+                        'inlet': 'Inlet (flow in)',
+                        'outlet': 'Outlet (flow out)',
+                        'wall': 'Wall (solid)',
+                        'symmetry': 'Symmetry axis',
+                        'farfield': 'Farfield'
+                    }
+                    
                     legend_elements = []
-                    for boundary_name, color in boundary_colors.items():
-                        if boundary_name in boundary_elements and boundary_elements[boundary_name]:
-                            legend_elements.append(matplotlib.lines.Line2D([0], [0], color=color, lw=2, label=boundary_name))
+                    for name in legend_order:
+                        if name in boundaries_plotted:
+                            label = legend_labels.get(name, name)
+                            legend_elements.append(
+                                matplotlib.lines.Line2D([0], [0], color=boundaries_plotted[name], 
+                                                       lw=3, label=label)
+                            )
                     
                     if legend_elements:
-                        self.mesh_canvas.ax.legend(handles=legend_elements, loc='upper right', fontsize=8)
+                        legend = self.mesh_canvas.ax.legend(
+                            handles=legend_elements, 
+                            loc='upper right', 
+                            fontsize=9,
+                            facecolor='#2a2a2a',
+                            edgecolor='#404040',
+                            labelcolor=Theme.TEXT
+                        )
+                
+                # Store original limits for reset
+                self.mesh_canvas.store_original_limits()
                 
             else:
                 # Show message if no mesh data
@@ -5657,21 +5827,19 @@ class NozzleDesignGUI(QMainWindow):
                                        transform=self.mesh_canvas.ax.transAxes, ha='center', va='center',
                                        color=Theme.TEXT, fontsize=12)
                 self.mesh_canvas.ax.set_title('Mesh Visualization', color=Theme.TEXT)
+                self.mesh_canvas.ax.set_facecolor('#1e1e1e')
             
             self.mesh_canvas.draw()
             
         except Exception as e:
             print(f"Mesh visualization error: {e}")
+            import traceback
+            traceback.print_exc()
             self.mesh_canvas.ax.clear()
             self.mesh_canvas.ax.text(0.5, 0.5, f'Mesh visualization failed:\n{str(e)}', 
                                    transform=self.mesh_canvas.ax.transAxes, ha='center', va='center',
                                    color=Theme.TEXT, fontsize=10)
-            self.mesh_canvas.draw()
-            # Fallback to simple text display
-            self.mesh_canvas.ax.clear()
-            self.mesh_canvas.ax.text(0.5, 0.5, f'Mesh generated successfully\n{str(e)}', 
-                                   transform=self.mesh_canvas.ax.transAxes, ha='center', va='center',
-                                   fontsize=12)
+            self.mesh_canvas.ax.set_facecolor('#1e1e1e')
             self.mesh_canvas.draw()
         
     def setup_simulation(self):

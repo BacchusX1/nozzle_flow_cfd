@@ -282,19 +282,35 @@ class AdvancedMeshGenerator:
                 start_pt = raw_points[0]
                 end_pt = raw_points[-1]
                 
-                # Check if this is a vertical line at x_min (inlet)
-                is_vertical = abs(start_pt[0] - end_pt[0]) < 0.01
-                is_at_inlet = abs(start_pt[0] - self.x_min) < 0.01 and abs(end_pt[0] - self.x_min) < 0.01
+                # Calculate curve properties
+                dx = abs(start_pt[0] - end_pt[0])
+                dy = abs(start_pt[1] - end_pt[1])
+                is_vertical = dx < 0.01 and dy > 0.01  # Mostly vertical
+                is_horizontal = dy < 0.01 and dx > 0.01  # Mostly horizontal
                 
-                # Check if this is at the far right (ambient outlet)
-                is_at_outlet_x = abs(start_pt[0] - self.x_max) < 0.01 or abs(end_pt[0] - self.x_max) < 0.01
-                is_at_ymax = abs(start_pt[1]) > self.y_max * 0.8 or abs(end_pt[1]) > self.y_max * 0.8
+                # Check if BOTH endpoints are at x_min (inlet - left side)
+                both_at_xmin = (abs(start_pt[0] - self.x_min) < 0.01 and 
+                               abs(end_pt[0] - self.x_min) < 0.01)
                 
-                if is_vertical and is_at_inlet:
+                # Check if BOTH endpoints are at x_max (outlet - right side)  
+                both_at_xmax = (abs(start_pt[0] - self.x_max) < 0.01 and 
+                               abs(end_pt[0] - self.x_max) < 0.01)
+                
+                # For ambient domains: outlet can be at far y_max (top/bottom of ambient)
+                # These are typically long horizontal lines at the edges
+                is_far_boundary = (abs(start_pt[1]) > self.y_max * 0.9 or 
+                                  abs(end_pt[1]) > self.y_max * 0.9)
+                is_long_horizontal = is_horizontal and dx > self.x_max * 0.3
+                
+                if is_vertical and both_at_xmin:
                     self.inlet_curves.append(curve)
-                elif is_at_outlet_x or (is_at_ymax and abs(end_pt[0] - start_pt[0]) > 0.5):
+                elif is_vertical and both_at_xmax:
+                    self.outlet_curves.append(curve)
+                elif is_far_boundary and is_long_horizontal:
+                    # Far-field or ambient boundary (treat as outlet for pressure BC)
                     self.outlet_curves.append(curve)
                 else:
+                    # Default to wall for nozzle contours
                     self.wall_curves.append(curve)
         
         if not all_curves:

@@ -1,6 +1,8 @@
 
  # Nozzle Flow CFD
 
+![Nozzle Flow CFD](screenshots/main.png)
+
 A desktop application for nozzle CFD workflow: geometry design, mesh generation, simulation with SU2, and post-processing.
 
 Note: This repository was primarily generated using AI tools (GitHub Copilot with Claude and OpenAI models).
