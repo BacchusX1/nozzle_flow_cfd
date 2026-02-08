@@ -67,26 +67,34 @@ nozzle_flow_cfd/
     standard_values_gui.yml     Default GUI values
 
     src/
-        frontend.py             Main GUI application (PySide6)
-        core/
-            geometry.py         Geometry element classes
-            nozzle.py           Nozzle geometry generation
+        frontend/               GUI layer
+            frontend.py         Main GUI application (PySide6)
+            theme.py            UI theming and styling
+            theme_showcase.css  CSS theme reference
+
+        backend/                Core functionality
             standard_values.py  Configuration loader
-            su2_runner.py       SU2 execution wrapper
-            su2_mesh_converter.py   Gmsh to SU2 mesh conversion
-            su2_case_analyzer.py    Results parsing
-            template_loader.py  Geometry template handling
-            theme.py            UI theming
-            modules/
-                mesh_generator.py       Gmsh mesh generation
+
+            drawing/            Geometry creation
+                geometry.py     Geometry element classes (polynomial, line, arc)
+                nozzle.py       Nozzle geometry handling
+                template_loader.py  Template loading
+
+            meshing/            Mesh generation
+                mesh_generator.py       Gmsh mesh generation with boundary layers
+                su2_mesh_converter.py   Gmsh to SU2 mesh conversion
+
+            simulation/         CFD simulation
                 simulation_setup.py     SU2 case configuration
-                postprocessing.py       Result visualization
-                interactive_postprocessor.py   Interactive plotting
+                su2_runner.py           SU2 execution wrapper
+
+            postprocessing/     Results analysis
+                postprocessing.py               Result visualization
+                interactive_postprocessor.py    Interactive plotting widget
+                su2_case_analyzer.py            SU2 output parsing
 
     geometry/
         templates/              Nozzle geometry templates (JSON)
-
-    case/                       Example simulation case files
 
     tests/                      Test suite
 

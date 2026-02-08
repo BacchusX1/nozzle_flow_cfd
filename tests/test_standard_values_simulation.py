@@ -9,12 +9,12 @@ from pathlib import Path
 import pytest
 import shutil
 
-from src.core.standard_values import DEFAULTS
-from src.core.modules.simulation_setup import (
+from backend.standard_values import DEFAULTS
+from backend.simulation.simulation_setup import (
     SimulationSetup, SolverType, BoundaryType, TurbulenceModelType,
     BoundaryCondition, FluidProperties, SolverSettings, TurbulenceModel
 )
-from src.core.su2_runner import SU2Runner
+from backend.simulation.su2_runner import SU2Runner
 
 
 def _is_su2_available() -> bool:

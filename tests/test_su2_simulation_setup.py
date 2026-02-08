@@ -2,7 +2,7 @@
 from pathlib import Path
 import pytest
 
-from src.core.modules.simulation_setup import (
+from backend.simulation.simulation_setup import (
     SimulationSetup, SolverType, BoundaryType, TurbulenceModelType,
     BoundaryCondition, FluidProperties, SolverSettings, TurbulenceModel
 )

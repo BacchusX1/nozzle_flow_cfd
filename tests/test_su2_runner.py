@@ -2,7 +2,7 @@
 from pathlib import Path
 import pytest
 
-from src.core.su2_runner import SU2Runner
+from backend.simulation.su2_runner import SU2Runner
 
 
 def _write_min_case(case_dir: Path) -> None:

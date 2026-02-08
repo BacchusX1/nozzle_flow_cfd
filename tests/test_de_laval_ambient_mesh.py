@@ -26,7 +26,7 @@ def _is_gmsh_available() -> bool:
 @pytest.fixture
 def template_loader():
     """Create a template loader instance."""
-    from core.template_loader import TemplateLoader
+    from backend.drawing.template_loader import TemplateLoader
     return TemplateLoader()
 
 
@@ -42,8 +42,8 @@ def standard_mesh_params():
     
     Uses slightly coarser settings to make tests run in reasonable time.
     """
-    from core.modules.mesh_generator import MeshParameters
-    from core.standard_values import StandardValues
+    from backend.meshing.mesh_generator import MeshParameters
+    from backend.standard_values import StandardValues
     
     sv = StandardValues()
     
@@ -117,7 +117,7 @@ class TestDeLavalAmbientMeshGeneration:
     
     def test_mesh_generation_triangles(self, de_laval_ambient_geometry):
         """Test mesh generation with triangle elements (faster)."""
-        from core.modules.mesh_generator import MeshParameters, AdvancedMeshGenerator
+        from backend.meshing.mesh_generator import MeshParameters, AdvancedMeshGenerator
         
         params = MeshParameters()
         params.mesh_type = 'tet'
@@ -137,7 +137,7 @@ class TestDeLavalAmbientMeshGeneration:
     
     def test_mesh_generation_quads(self, de_laval_ambient_geometry):
         """Test mesh generation with quad elements (hex type)."""
-        from core.modules.mesh_generator import MeshParameters, AdvancedMeshGenerator
+        from backend.meshing.mesh_generator import MeshParameters, AdvancedMeshGenerator
         
         params = MeshParameters()
         params.mesh_type = 'hex'
@@ -157,7 +157,7 @@ class TestDeLavalAmbientMeshGeneration:
     
     def test_mesh_has_correct_boundaries(self, de_laval_ambient_geometry):
         """Test that generated mesh has wall, inlet, and outlet boundaries."""
-        from core.modules.mesh_generator import MeshParameters, AdvancedMeshGenerator
+        from backend.meshing.mesh_generator import MeshParameters, AdvancedMeshGenerator
         
         params = MeshParameters()
         params.mesh_type = 'tet'
@@ -183,7 +183,7 @@ class TestDeLavalAmbientMeshGeneration:
     @pytest.mark.slow
     def test_mesh_with_boundary_layers(self, de_laval_ambient_geometry, standard_mesh_params):
         """Test mesh generation with boundary layers enabled (slower test)."""
-        from core.modules.mesh_generator import AdvancedMeshGenerator
+        from backend.meshing.mesh_generator import AdvancedMeshGenerator
         
         generator = AdvancedMeshGenerator()
         mesh_data = generator.generate_mesh(de_laval_ambient_geometry, standard_mesh_params)
@@ -198,7 +198,7 @@ class TestDeLavalAmbientMeshGeneration:
     
     def test_mesh_vertices_valid(self, de_laval_ambient_geometry):
         """Test that mesh vertices are within expected domain bounds."""
-        from core.modules.mesh_generator import MeshParameters, AdvancedMeshGenerator
+        from backend.meshing.mesh_generator import MeshParameters, AdvancedMeshGenerator
         
         params = MeshParameters()
         params.mesh_type = 'tet'
@@ -228,7 +228,7 @@ class TestClosedDomainDetection:
     
     def test_de_laval_ambient_detected_as_closed(self, de_laval_ambient_geometry):
         """Test that de_laval_ambient is correctly detected as closed domain."""
-        from core.modules.mesh_generator import AdvancedMeshGenerator
+        from backend.meshing.mesh_generator import AdvancedMeshGenerator
         
         generator = AdvancedMeshGenerator()
         x_coords, y_coords = de_laval_ambient_geometry.get_interpolated_points()
@@ -238,7 +238,7 @@ class TestClosedDomainDetection:
     
     def test_simple_nozzle_detected_as_symmetric(self, template_loader):
         """Test that simple nozzle templates are detected as symmetric (not closed)."""
-        from core.modules.mesh_generator import AdvancedMeshGenerator
+        from backend.meshing.mesh_generator import AdvancedMeshGenerator
         
         # Load a simple nozzle template (upper profile only)
         try:

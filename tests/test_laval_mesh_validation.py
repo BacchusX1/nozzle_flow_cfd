@@ -192,9 +192,9 @@ class TestLavalNozzleMeshGeneration:
     
     def test_generate_mesh_from_de_laval_template(self, tmp_path: Path):
         """Generate a mesh from de Laval template and validate integrity."""
-        from src.core.template_loader import TemplateLoader
-        from src.core.modules.mesh_generator import AdvancedMeshGenerator, MeshParameters
-        from src.core.su2_mesh_converter import SU2MeshConverter
+        from backend.drawing.template_loader import TemplateLoader
+        from backend.meshing.mesh_generator import AdvancedMeshGenerator, MeshParameters
+        from backend.meshing.su2_mesh_converter import SU2MeshConverter
         
         # Load de Laval template - returns a NozzleGeometry object
         loader = TemplateLoader()
@@ -238,9 +238,9 @@ class TestLavalNozzleMeshGeneration:
     
     def test_mesh_node_count_matches_elements(self, tmp_path: Path):
         """Ensure all declared nodes are referenced by elements (no orphans)."""
-        from src.core.template_loader import TemplateLoader
-        from src.core.modules.mesh_generator import AdvancedMeshGenerator, MeshParameters
-        from src.core.su2_mesh_converter import SU2MeshConverter
+        from backend.drawing.template_loader import TemplateLoader
+        from backend.meshing.mesh_generator import AdvancedMeshGenerator, MeshParameters
+        from backend.meshing.su2_mesh_converter import SU2MeshConverter
         
         # Load de Laval template - returns a NozzleGeometry object
         loader = TemplateLoader()
@@ -279,11 +279,11 @@ class TestSU2MeshCompatibility:
     
     def test_su2_accepts_generated_mesh_serial(self, tmp_path: Path):
         """Test that SU2 can read and validate the generated mesh (serial mode)."""
-        from src.core.template_loader import TemplateLoader
-        from src.core.modules.mesh_generator import AdvancedMeshGenerator, MeshParameters
-        from src.core.su2_mesh_converter import SU2MeshConverter
-        from src.core.su2_runner import SU2Runner
-        from src.core.modules.simulation_setup import (
+        from backend.drawing.template_loader import TemplateLoader
+        from backend.meshing.mesh_generator import AdvancedMeshGenerator, MeshParameters
+        from backend.meshing.su2_mesh_converter import SU2MeshConverter
+        from backend.simulation.su2_runner import SU2Runner
+        from backend.simulation.simulation_setup import (
             SimulationSetup, SolverType, BoundaryType, BoundaryCondition
         )
         
@@ -362,11 +362,11 @@ class TestSU2MeshCompatibility:
         if not shutil.which("mpirun"):
             pytest.skip("mpirun not available")
         
-        from src.core.template_loader import TemplateLoader
-        from src.core.modules.mesh_generator import AdvancedMeshGenerator, MeshParameters
-        from src.core.su2_mesh_converter import SU2MeshConverter
-        from src.core.su2_runner import SU2Runner
-        from src.core.modules.simulation_setup import (
+        from backend.drawing.template_loader import TemplateLoader
+        from backend.meshing.mesh_generator import AdvancedMeshGenerator, MeshParameters
+        from backend.meshing.su2_mesh_converter import SU2MeshConverter
+        from backend.simulation.su2_runner import SU2Runner
+        from backend.simulation.simulation_setup import (
             SimulationSetup, SolverType, BoundaryType, BoundaryCondition
         )
         

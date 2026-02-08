@@ -19,7 +19,7 @@ def suppress_message_boxes(monkeypatch):
 
 @pytest.fixture()
 def gui(qapp, suppress_message_boxes):
-    from src import frontend
+    from frontend import frontend
     from PySide6.QtWidgets import QWidget
 
     # We are intentionally not testing Post-processing yet; avoid
@@ -77,7 +77,7 @@ def test_generate_mesh_button_wires_mesh_data(gui, qapp, monkeypatch, tmp_path: 
     gui.load_template("converging")
 
     # Patch the mesher to be deterministic and fast.
-    from src.core.modules import mesh_generator as mg
+    from backend.meshing import mesh_generator as mg
 
     mesh_data = {
         "nodes": [(0.0, 0.0), (1.0, 0.0), (1.0, 1.0), (0.0, 1.0)],
@@ -234,7 +234,7 @@ def test_run_simulation_calls_su2_runner(gui, qapp, monkeypatch, tmp_path: Path)
     assert (cd / "config.cfg").exists()
     
     # Verify the SU2Runner can be instantiated on the case
-    from src.core.su2_runner import SU2Runner
+    from backend.simulation.su2_runner import SU2Runner
     runner = SU2Runner(str(cd))
     valid, message = runner.validate_case()
     # Case might not have mesh file since we didn't generate one

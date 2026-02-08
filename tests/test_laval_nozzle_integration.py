@@ -46,7 +46,7 @@ def suppress_message_boxes(monkeypatch):
 @pytest.fixture()
 def gui(qapp, suppress_message_boxes):
     """Create GUI instance with stubbed post-processing tab."""
-    from src import frontend
+    from frontend import frontend
     from PySide6.QtWidgets import QWidget
 
     # Stub the heavy post-processing tab
@@ -163,7 +163,7 @@ class TestDeLavalSteadyIntegration:
         _modify_config_for_quick_test(cd / "config.cfg", max_iter=10)
 
         # Step 6: Run actual SU2 simulation
-        from src.core.su2_runner import SU2Runner
+        from backend.simulation.su2_runner import SU2Runner
         
         runner = SU2Runner(str(cd))
         valid, msg = runner.validate_case()
@@ -237,7 +237,7 @@ class TestDeLavalSteadyIntegration:
         _modify_config_for_quick_test(cd / "config.cfg", max_iter=10)
 
         # Step 6: Run SU2
-        from src.core.su2_runner import SU2Runner
+        from backend.simulation.su2_runner import SU2Runner
         
         runner = SU2Runner(str(cd))
         success = runner.run_solver(n_processors=1)
@@ -301,7 +301,7 @@ class TestDeLavalTransientIntegration:
         _modify_config_for_quick_test(cd / "config.cfg", max_iter=5)
 
         # Step 6: Run SU2
-        from src.core.su2_runner import SU2Runner
+        from backend.simulation.su2_runner import SU2Runner
         
         runner = SU2Runner(str(cd))
         success = runner.run_solver(n_processors=1)
@@ -359,7 +359,7 @@ class TestDeLavalTransientIntegration:
         _modify_config_for_quick_test(cd / "config.cfg", max_iter=5)
 
         # Step 6: Run SU2
-        from src.core.su2_runner import SU2Runner
+        from backend.simulation.su2_runner import SU2Runner
         
         runner = SU2Runner(str(cd))
         success = runner.run_solver(n_processors=1)
@@ -399,7 +399,7 @@ class TestSU2RunnerIntegration:
 
     def test_runner_detects_missing_mesh(self, tmp_path: Path):
         """Test that SU2Runner correctly validates missing mesh."""
-        from src.core.su2_runner import SU2Runner
+        from backend.simulation.su2_runner import SU2Runner
         
         case_dir = tmp_path / "incomplete_case"
         case_dir.mkdir()
@@ -420,7 +420,7 @@ ITER= 10
 
     def test_runner_validates_complete_case(self, tmp_path: Path):
         """Test that SU2Runner validates a complete case."""
-        from src.core.su2_runner import SU2Runner
+        from backend.simulation.su2_runner import SU2Runner
         
         case_dir = tmp_path / "complete_case"
         case_dir.mkdir()
@@ -492,7 +492,7 @@ class TestParallelExecution:
         cd = Path(gui.current_case_directory)
         _modify_config_for_quick_test(cd / "config.cfg", max_iter=10)
 
-        from src.core.su2_runner import SU2Runner
+        from backend.simulation.su2_runner import SU2Runner
         
         runner = SU2Runner(str(cd))
         success = runner.run_solver(n_processors=2)

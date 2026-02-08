@@ -26,7 +26,7 @@ def suppress_message_boxes(monkeypatch):
 @pytest.fixture()
 def gui(qapp, suppress_message_boxes):
     """Create GUI instance with stubbed post-processing tab."""
-    from src import frontend
+    from frontend import frontend
     from PySide6.QtWidgets import QWidget
 
     # Stub the heavy post-processing tab
@@ -46,7 +46,7 @@ def gui(qapp, suppress_message_boxes):
 @pytest.fixture()
 def mock_mesh_generator(monkeypatch):
     """Mock mesh generator for fast deterministic meshing."""
-    from src.core.modules import mesh_generator as mg
+    from backend.meshing import mesh_generator as mg
 
     mesh_data = {
         "nodes": [(0.0, 0.0), (1.0, 0.0), (1.0, 0.5), (0.0, 0.5)],
@@ -369,7 +369,7 @@ class TestSU2ExecutableValidation:
         # Don't mock SU2Runner - let it try to find the real executable
         # The run should fail gracefully with an error message in the log
         
-        from src.core.su2_runner import SU2Runner
+        from backend.simulation.su2_runner import SU2Runner
         runner = SU2Runner(str(case_dir))
         
         # Manually check executable availability
@@ -391,7 +391,7 @@ class TestSU2ExecutableValidation:
         self, gui, qapp, mock_mesh_generator, tmp_path: Path
     ):
         """Test that SU2Runner validates case files before attempting to run."""
-        from src.core.su2_runner import SU2Runner
+        from backend.simulation.su2_runner import SU2Runner
         
         # Create case without mesh file
         case_dir = tmp_path / "invalid_case"

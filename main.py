@@ -29,9 +29,10 @@ sys.path.insert(0, os.path.dirname(__file__))
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'src'))
 
 # Fix for Wayland/Qt platform issues on Linux
-# Try platforms in order: wayland, xcb, offscreen
+# Force xcb (X11) backend if Wayland fails
 if sys.platform == 'linux' and 'QT_QPA_PLATFORM' not in os.environ:
-    # Don't force a platform - let Qt choose, but suppress wayland warning
+    # Use X11 (xcb) by default to avoid Wayland issues
+    os.environ['QT_QPA_PLATFORM'] = 'xcb'
     os.environ.setdefault('QT_LOGGING_RULES', 'qt.qpa.plugin=false')
 
 def main():
@@ -39,12 +40,22 @@ def main():
     try:
         from PySide6.QtWidgets import QApplication
         from PySide6.QtCore import Qt
+        from PySide6.QtGui import QGuiApplication
+        
+        # Enable high DPI scaling for multi-resolution support (FHD, QHD, 4K, 8K)
+        # These must be set before QApplication is created
+        QGuiApplication.setHighDpiScaleFactorRoundingPolicy(
+            Qt.HighDpiScaleFactorRoundingPolicy.PassThrough
+        )
         
         # Create QApplication first
         app = QApplication(sys.argv)
         
+        # Set application-wide attributes for consistent cursor and DPI handling
+        app.setStyle('Fusion')  # Fusion style works well across all platforms
+        
         # Import GUI after QApplication is created
-        from frontend import NozzleDesignGUI
+        from frontend.frontend import NozzleDesignGUI
         
         # Create and show main window
         window = NozzleDesignGUI()
