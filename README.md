@@ -6,6 +6,7 @@
 A desktop application for nozzle CFD workflow: geometry design, mesh generation, simulation with SU2, and post-processing.
 
 Note: This repository was primarily generated using AI tools (GitHub Copilot with Claude and OpenAI models).
+Only minor testing performed yet (de-laval example with and without ambient in transient and steady mode) --> review of gui to be more user-friendly and standardized
 
 
 ## Quick Start
